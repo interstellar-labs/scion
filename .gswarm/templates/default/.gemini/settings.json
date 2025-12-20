@@ -1,0 +1,5 @@
+{
+  "tools": ["*"],
+  "extensions": [],
+  "yolo": true
+}

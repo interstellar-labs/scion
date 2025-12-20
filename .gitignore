@@ -1,0 +1,4 @@
+# gswarm ignore
+.gswarm/agents/
+.gswarm_worktrees/
+gswarm
