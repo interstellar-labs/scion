@@ -107,6 +107,10 @@ func (r *DockerRuntime) Stop(ctx context.Context, id string) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker stop failed: %w (output: %s)", err, string(out))
 	}
+	return nil
+}
+
+func (r *DockerRuntime) Delete(ctx context.Context, id string) error {
 	cmdRm := exec.CommandContext(ctx, r.Command, "rm", id)
 	if out, err := cmdRm.CombinedOutput(); err != nil {
 		return fmt.Errorf("docker rm failed: %w (output: %s)", err, string(out))

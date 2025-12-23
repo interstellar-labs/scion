@@ -134,6 +134,10 @@ func (r *AppleContainerRuntime) Stop(ctx context.Context, id string) error {
 		return fmt.Errorf("container stop failed: %w (output: %s)", err, string(out))
 	}
 
+	return nil
+}
+
+func (r *AppleContainerRuntime) Delete(ctx context.Context, id string) error {
 	cmdRm := exec.CommandContext(ctx, r.Command, "rm", id)
 	outRm, err := cmdRm.CombinedOutput()
 	if err != nil {

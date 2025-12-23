@@ -2,7 +2,7 @@
 # hack/cleanup.sh - Cleanup agents and test directory
 
 REPO_ROOT=$(pwd)
-TEST_DIR="${REPO_ROOT}/../scion-qa-temp"
+TEST_DIR="${REPO_ROOT}/../qa-scion"
 
 echo "=== Cleaning up agents ==="
 

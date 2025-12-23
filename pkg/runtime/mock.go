@@ -27,6 +27,16 @@ func (m *MockRuntime) Run(ctx context.Context, config RunConfig) (string, error)
 }
 
 func (m *MockRuntime) Stop(ctx context.Context, id string) error {
+	agent, ok := m.Agents[id]
+	if !ok {
+		return fmt.Errorf("agent not found")
+	}
+	agent.Status = "Stopped"
+	m.Agents[id] = agent
+	return nil
+}
+
+func (m *MockRuntime) Delete(ctx context.Context, id string) error {
 	if _, ok := m.Agents[id]; !ok {
 		return fmt.Errorf("agent not found")
 	}

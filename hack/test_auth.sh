@@ -2,7 +2,7 @@
 # hack/test_auth.sh - Verify Auth Discovery
 
 REPO_ROOT=$(pwd)
-TEST_DIR="${REPO_ROOT}/../scion-qa-temp"
+TEST_DIR="${REPO_ROOT}/../qa-scion"
 
 # Load the test key
 if [ ! -f "${REPO_ROOT}/TEST_GEMINI_KEY" ]; then
