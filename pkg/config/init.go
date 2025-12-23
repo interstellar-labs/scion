@@ -26,7 +26,7 @@ var DefaultGeminiMD string
 //go:embed embeds/bashrc
 var DefaultBashrc string
 
-func SeedTemplateDir(templateDir string, templateName string) error {
+func SeedTemplateDir(templateDir string, templateName string, force bool) error {
 	// Create directories
 	dirs := []string{
 		templateDir,
@@ -60,7 +60,7 @@ func SeedTemplateDir(templateDir string, templateName string) error {
 
 	for _, f := range files {
 		// Always write settings.json to ensure it matches current defaults
-		if filepath.Base(f.path) == "settings.json" {
+		if force || filepath.Base(f.path) == "settings.json" {
 			if err := os.WriteFile(f.path, []byte(f.content), 0644); err != nil {
 				return fmt.Errorf("failed to write file %s: %w", f.path, err)
 			}
@@ -98,7 +98,7 @@ func InitProject(targetDir string) error {
 		return fmt.Errorf("failed to create agents directory: %w", err)
 	}
 
-	return SeedTemplateDir(defaultTemplateDir, "default")
+	return SeedTemplateDir(defaultTemplateDir, "default", false)
 }
 
 func InitGlobal() error {
@@ -115,5 +115,5 @@ func InitGlobal() error {
 		return fmt.Errorf("failed to create global agents directory: %w", err)
 	}
 
-	return SeedTemplateDir(defaultTemplateDir, "default")
+	return SeedTemplateDir(defaultTemplateDir, "default", false)
 }

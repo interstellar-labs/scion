@@ -114,7 +114,25 @@ func CreateTemplate(name string, global bool) error {
 		return fmt.Errorf("template %s already exists at %s", name, templateDir)
 	}
 
-	return SeedTemplateDir(templateDir, name)
+	return SeedTemplateDir(templateDir, name, false)
+}
+
+func UpdateDefaultTemplate(global bool) error {
+	var templatesDir string
+	var err error
+
+	if global {
+		templatesDir, err = GetGlobalTemplatesDir()
+	} else {
+		templatesDir, err = GetProjectTemplatesDir()
+	}
+
+	if err != nil {
+		return err
+	}
+
+	defaultTemplateDir := filepath.Join(templatesDir, "default")
+	return SeedTemplateDir(defaultTemplateDir, "default", true)
 }
 
 func DeleteTemplate(name string, global bool) error {

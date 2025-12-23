@@ -95,10 +95,25 @@ var templatesDeleteCmd = &cobra.Command{
 	},
 }
 
+var templatesUpdateDefaultCmd = &cobra.Command{
+	Use:   "update-default",
+	Short: "Update the default template with the latest from the binary",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		global, _ := cmd.Flags().GetBool("global")
+		err := config.UpdateDefaultTemplate(global)
+		if err != nil {
+			return err
+		}
+		fmt.Println("Default template updated successfully.")
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(templatesCmd)
 	templatesCmd.AddCommand(templatesListCmd)
 	templatesCmd.AddCommand(templatesShowCmd)
 	templatesCmd.AddCommand(templatesCreateCmd)
 	templatesCmd.AddCommand(templatesDeleteCmd)
+	templatesCmd.AddCommand(templatesUpdateDefaultCmd)
 }

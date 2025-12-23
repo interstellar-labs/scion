@@ -139,3 +139,57 @@ func TestDeleteTemplate(t *testing.T) {
 		t.Error("expected error when deleting non-existent template, got nil")
 	}
 }
+
+func TestUpdateDefaultTemplate(t *testing.T) {
+	// Setup a temporary directory for the test
+	tmpDir, err := os.MkdirTemp("", "scion-test-update-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Override home dir
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", origHome)
+
+	// Create a mock project structure
+	projectDir := filepath.Join(tmpDir, "project", DotScion)
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Helper to change current working directory
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	if err := os.Chdir(filepath.Dir(projectDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Initialize project (creates default template)
+	if err := InitProject(""); err != nil {
+		t.Fatal(err)
+	}
+
+	defaultTemplateScionJSON := filepath.Join(projectDir, "templates", "default", "scion.json")
+	
+	// Corrupt the default template file
+	corruptContent := "CORRUPT"
+	if err := os.WriteFile(defaultTemplateScionJSON, []byte(corruptContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Update default template
+	if err := UpdateDefaultTemplate(false); err != nil {
+		t.Fatalf("failed to update default template: %v", err)
+	}
+
+	// Verify it was restored
+	data, err := os.ReadFile(defaultTemplateScionJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) == corruptContent {
+		t.Error("expected scion.json to be overwritten, but it still contains corrupt content")
+	}
+}
