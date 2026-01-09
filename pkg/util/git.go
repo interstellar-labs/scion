@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -10,7 +11,16 @@ import (
 
 // IsGitRepo returns true if the current working directory is inside a git repository.
 func IsGitRepo() bool {
-	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+	return IsGitRepoDir("")
+}
+
+// IsGitRepoDir returns true if the specified directory is inside a git repository.
+func IsGitRepoDir(dir string) bool {
+	args := []string{"rev-parse", "--is-inside-work-tree"}
+	cmd := exec.Command("git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	err := cmd.Run()
 	return err == nil
 }
@@ -62,12 +72,54 @@ func CompareGitVersion(version string, minMajor, minMinor int) error {
 
 // RepoRoot returns the absolute path to the root of the git repository.
 func RepoRoot() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	return RepoRootDir("")
+}
+
+// RepoRootDir returns the absolute path to the root of the git repository for the specified directory.
+func RepoRootDir(dir string) (string, error) {
+	args := []string{"rev-parse", "--show-toplevel"}
+	cmd := exec.Command("git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// If rev-parse fails, it might be because we're in a .git directory.
+		// Try running from parent.
+		if dir != "" {
+			parent := filepath.Dir(dir)
+			if parent != dir {
+				return RepoRootDir(parent)
+			}
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// GetCommonGitDir returns the absolute path to the common git directory (the main .git dir).
+func GetCommonGitDir(dir string) (string, error) {
+	args := []string{"rev-parse", "--git-common-dir"}
+	cmd := exec.Command("git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(output)), nil
+	commonDir := strings.TrimSpace(string(output))
+	if !filepath.IsAbs(commonDir) {
+		if dir == "" {
+			var err error
+			dir, err = os.Getwd()
+			if err != nil {
+				return "", err
+			}
+		}
+		commonDir = filepath.Join(dir, commonDir)
+	}
+	return filepath.Clean(commonDir), nil
 }
 
 // IsIgnored returns true if the given path is ignored by git.
@@ -79,13 +131,21 @@ func IsIgnored(path string) bool {
 
 // CreateWorktree creates a new git worktree at the specified path with a new branch.
 func CreateWorktree(path, branch string) error {
+	root, err := RepoRootDir(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("failed to find repo root for worktree: %w", err)
+	}
+
 	// git worktree add --relative-paths -b <branch> <path>
+	// We run from root to ensure --relative-paths are calculated from root
 	cmd := exec.Command("git", "worktree", "add", "--relative-paths", "-b", branch, path)
+	cmd.Dir = root
 	if output, err := cmd.CombinedOutput(); err != nil {
 		outputStr := string(output)
 		// If branch already exists, try to just add it
 		if strings.Contains(outputStr, "already exists") {
 			cmd = exec.Command("git", "worktree", "add", "--relative-paths", path, branch)
+			cmd.Dir = root
 			if output, err := cmd.CombinedOutput(); err != nil {
 				outputStr = string(output)
 				if strings.Contains(outputStr, "already checked out") {

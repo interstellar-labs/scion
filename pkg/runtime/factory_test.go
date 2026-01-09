@@ -11,6 +11,14 @@ func TestGetRuntime(t *testing.T) {
 	// which might override the settings-based resolution on different machines.
 	t.Setenv("PATH", "")
 
+	// Move to a temporary directory to avoid picking up the project's own .scion settings
+	oldWd, _ := os.Getwd()
+	tmpWd := t.TempDir()
+	if err := os.Chdir(tmpWd); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
 	// Test default behavior (LoadSettings defaults to "container" via local profile)
 	t.Run("Default", func(t *testing.T) {
 		// Ensure we are not picking up some random settings file

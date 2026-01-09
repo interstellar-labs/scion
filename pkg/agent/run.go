@@ -174,8 +174,13 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 	}
 
 	repoRoot := ""
-	if util.IsGitRepo() {
-		repoRoot, _ = util.RepoRoot()
+	if agentWorkspace != "" && util.IsGitRepoDir(agentWorkspace) {
+		commonDir, err := util.GetCommonGitDir(agentWorkspace)
+		if err == nil {
+			repoRoot = filepath.Dir(commonDir)
+		}
+	} else if util.IsGitRepoDir(projectDir) {
+		repoRoot, _ = util.RepoRootDir(projectDir)
 	}
 
 	runCfg := runtime.RunConfig{

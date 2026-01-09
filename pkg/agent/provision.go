@@ -70,14 +70,15 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 	}
 
 	groveName := config.GetGroveName(projectDir)
+	isGit := util.IsGitRepoDir(projectDir)
 
 	// Verify .gitignore if in a repo
-	if util.IsGitRepo() {
+	if isGit {
 		if workdir != "" {
 			return "", "", nil, fmt.Errorf("--workdir cannot be used when in a git repository")
 		}
 		// Find the projectDir relative to repo root if possible
-		root, err := util.RepoRoot()
+		root, err := util.RepoRootDir(projectDir)
 		if err == nil {
 			rel, err := filepath.Rel(root, projectDir)
 			if err == nil && !strings.HasPrefix(rel, "..") {
@@ -106,7 +107,7 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 		}
 	}
 
-	if util.IsGitRepo() {
+	if isGit {
 		// Remove existing workspace dir if it exists to allow worktree add
 		_ = util.MakeWritableRecursive(agentWorkspace)
 		os.RemoveAll(agentWorkspace)
@@ -185,7 +186,7 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 	}
 
 	// For non-git repos, add a volume mount for the project root to /workspace
-	if !util.IsGitRepo() {
+	if !isGit {
 		var workspaceSource string
 		if workdir != "" {
 			var err error

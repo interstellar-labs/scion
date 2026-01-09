@@ -82,7 +82,10 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 			registerMount(config.Workspace, containerWorkspace, false, true)
 			addArg("--workdir", containerWorkspace)
 		} else {
-			// Fallback if workspace is outside repo root
+			// Fallback if workspace is outside repo root or relative path is not straightforward.
+			// Still mount RepoRoot so that .git worktree pointers can potentially be resolved if
+			// we are clever, but for now just mount both.
+			registerMount(config.RepoRoot, "/repo-root", false, true)
 			registerMount(config.Workspace, "/workspace", false, true)
 			addArg("--workdir", "/workspace")
 		}
