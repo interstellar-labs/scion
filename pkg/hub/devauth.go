@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"strings"
 
@@ -30,7 +31,13 @@ type userContextKey struct{}
 
 // DevAuthMiddleware creates middleware that validates development tokens.
 // If the token is valid, it adds a DevUser to the request context.
+// Use DevAuthMiddlewareWithDebug for verbose logging of auth failures.
 func DevAuthMiddleware(validToken string) func(http.Handler) http.Handler {
+	return DevAuthMiddlewareWithDebug(validToken, false)
+}
+
+// DevAuthMiddlewareWithDebug creates middleware with optional debug logging.
+func DevAuthMiddlewareWithDebug(validToken string, debug bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Skip auth for health endpoints
@@ -42,6 +49,9 @@ func DevAuthMiddleware(validToken string) func(http.Handler) http.Handler {
 			// Extract token from Authorization header
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
+				if debug {
+					log.Printf("[Hub] Auth failed: missing Authorization header for %s %s", r.Method, r.URL.Path)
+				}
 				writeError(w, http.StatusUnauthorized, ErrCodeUnauthorized,
 					"missing authorization header", nil)
 				return
@@ -49,6 +59,9 @@ func DevAuthMiddleware(validToken string) func(http.Handler) http.Handler {
 
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+				if debug {
+					log.Printf("[Hub] Auth failed: invalid Authorization header format (expected 'Bearer <token>')")
+				}
 				writeError(w, http.StatusUnauthorized, ErrCodeUnauthorized,
 					"invalid authorization header format", nil)
 				return
@@ -58,9 +71,25 @@ func DevAuthMiddleware(validToken string) func(http.Handler) http.Handler {
 
 			// Validate token (constant-time comparison)
 			if !apiclient.ValidateDevToken(token, validToken) {
+				if debug {
+					// Log token prefix for debugging (safe: only shows first chars)
+					tokenPrefix := token
+					if len(tokenPrefix) > 20 {
+						tokenPrefix = tokenPrefix[:20] + "..."
+					}
+					expectedPrefix := validToken
+					if len(expectedPrefix) > 20 {
+						expectedPrefix = expectedPrefix[:20] + "..."
+					}
+					log.Printf("[Hub] Auth failed: token mismatch (provided: %s, expected: %s)", tokenPrefix, expectedPrefix)
+				}
 				writeError(w, http.StatusUnauthorized, ErrCodeUnauthorized,
 					"invalid token", nil)
 				return
+			}
+
+			if debug {
+				log.Printf("[Hub] Auth success: dev-user authenticated")
 			}
 
 			// Add dev user context

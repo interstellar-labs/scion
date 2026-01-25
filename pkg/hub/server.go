@@ -188,7 +188,7 @@ func (s *Server) applyMiddleware(h http.Handler) http.Handler {
 	h = s.loggingMiddleware(h)
 	// Apply dev auth middleware if configured
 	if s.config.DevAuthToken != "" {
-		h = DevAuthMiddleware(s.config.DevAuthToken)(h)
+		h = DevAuthMiddlewareWithDebug(s.config.DevAuthToken, s.config.Debug)(h)
 	}
 	if s.config.CORSEnabled {
 		h = s.corsMiddleware(h)

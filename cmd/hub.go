@@ -158,16 +158,26 @@ func getHubClient(settings *config.Settings) (hubclient.Client, error) {
 
 	var opts []hubclient.Option
 
-	// Add authentication
+	// Add authentication - check in priority order
+	authConfigured := false
 	if settings.Hub != nil {
 		if settings.Hub.Token != "" {
 			opts = append(opts, hubclient.WithBearerToken(settings.Hub.Token))
+			authConfigured = true
 		} else if settings.Hub.APIKey != "" {
 			opts = append(opts, hubclient.WithAPIKey(settings.Hub.APIKey))
+			authConfigured = true
 		} else if settings.Hub.HostToken != "" {
 			// Use host token for authentication if available
 			opts = append(opts, hubclient.WithBearerToken(settings.Hub.HostToken))
+			authConfigured = true
 		}
+	}
+
+	// Fallback to auto dev auth if no explicit auth configured
+	// This checks SCION_DEV_TOKEN env var and ~/.scion/dev-token file
+	if !authConfigured {
+		opts = append(opts, hubclient.WithAutoDevAuth())
 	}
 
 	opts = append(opts, hubclient.WithTimeout(30*time.Second))
