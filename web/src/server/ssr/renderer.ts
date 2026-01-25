@@ -25,6 +25,8 @@ import '../../components/shared/status-badge.js';
 
 // Page components
 import '../../components/pages/home.js';
+import '../../components/pages/groves.js';
+import '../../components/pages/agents.js';
 import '../../components/pages/not-found.js';
 
 export interface RenderContext {
@@ -101,10 +103,13 @@ function getPageTemplate(url: string, pageData: PageData): TemplateResult {
     return html`<scion-page-home .pageData=${pageData}></scion-page-home>`;
   }
 
-  // Future routes will be added here as we implement more pages
-  // if (url === '/groves') {
-  //     return html`<scion-grove-list .pageData=${pageData}></scion-grove-list>`;
-  // }
+  if (url === '/groves') {
+    return html`<scion-page-groves .pageData=${pageData}></scion-page-groves>`;
+  }
+
+  if (url === '/agents') {
+    return html`<scion-page-agents .pageData=${pageData}></scion-page-agents>`;
+  }
 
   // 404 for unmatched routes
   return html`<scion-page-404 .pageData=${pageData}></scion-page-404>`;

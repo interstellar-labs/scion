@@ -151,6 +151,8 @@ export function getHtmlTemplate(opts: HtmlTemplateOptions): string {
         scion-breadcrumb:not(:defined),
         scion-status-badge:not(:defined),
         scion-page-home:not(:defined),
+        scion-page-groves:not(:defined),
+        scion-page-agents:not(:defined),
         scion-page-404:not(:defined) {
             display: block;
             opacity: 0.5;

@@ -34,3 +34,46 @@ export interface RouteConfig {
   component: string;
   action?: () => Promise<void>;
 }
+
+/**
+ * Grove status enumeration
+ */
+export type GroveStatus = 'active' | 'inactive' | 'error';
+
+/**
+ * Grove information from the Hub API
+ */
+export interface Grove {
+  id: string;
+  name: string;
+  path: string;
+  status: GroveStatus;
+  agentCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Agent status enumeration
+ */
+export type AgentStatus = 'running' | 'stopped' | 'provisioning' | 'error';
+
+/**
+ * Agent session status
+ */
+export type AgentSessionStatus = 'idle' | 'active' | 'busy' | 'disconnected';
+
+/**
+ * Agent information from the Hub API
+ */
+export interface Agent {
+  id: string;
+  name: string;
+  groveId: string;
+  template: string;
+  status: AgentStatus;
+  sessionStatus?: AgentSessionStatus;
+  taskSummary?: string;
+  createdAt: string;
+  updatedAt: string;
+}

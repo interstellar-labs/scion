@@ -117,6 +117,7 @@ web/
 | `HOST` | `0.0.0.0` | Server hostname |
 | `NODE_ENV` | `development` | Environment mode |
 | `HUB_API_URL` | `http://localhost:9810` | Hub API endpoint |
+| `SCION_API_DEBUG` | `false` | Enable debug logging (verbose request/response logs) |
 
 ## Milestone Progress
 

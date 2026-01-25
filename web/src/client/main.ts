@@ -21,6 +21,8 @@ import '../components/shared/status-badge.js';
 
 // Page components
 import '../components/pages/home.js';
+import '../components/pages/groves.js';
+import '../components/pages/agents.js';
 import '../components/pages/not-found.js';
 
 /**
@@ -45,6 +47,8 @@ async function init(): Promise<void> {
     customElements.whenDefined('scion-status-badge'),
     // Page components
     customElements.whenDefined('scion-page-home'),
+    customElements.whenDefined('scion-page-groves'),
+    customElements.whenDefined('scion-page-agents'),
     customElements.whenDefined('scion-page-404'),
   ]);
 

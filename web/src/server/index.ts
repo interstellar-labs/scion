@@ -12,15 +12,21 @@ const app = createApp(config);
 
 // Start the server
 const server = app.listen(config.port, config.host, () => {
+  const debugStatus = config.debug ? 'enabled' : 'disabled';
   console.info(`
 ╔════════════════════════════════════════════════════════════╗
 ║                   Scion Web Frontend                        ║
 ╠════════════════════════════════════════════════════════════╣
 ║  Server running at http://${config.host}:${config.port.toString().padEnd(4)}                       ║
 ║  Environment: ${config.production ? 'production' : 'development'}                                ║
+║  Debug mode: ${debugStatus.padEnd(8)}                                       ║
 ║  Hub API: ${config.hubApiUrl.substring(0, 40).padEnd(40)}     ║
 ╚════════════════════════════════════════════════════════════╝
   `);
+
+  if (config.debug) {
+    console.info('[DEBUG] Debug logging is enabled. Set SCION_API_DEBUG=false to disable.');
+  }
 });
 
 // Graceful shutdown handling

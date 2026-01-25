@@ -14,6 +14,9 @@ export interface AppConfig {
   /** Whether running in production mode */
   production: boolean;
 
+  /** Whether debug mode is enabled */
+  debug: boolean;
+
   /** Hub API URL */
   hubApiUrl: string;
 
@@ -43,20 +46,21 @@ function getEnvNumber(key: string, defaultValue: number): number {
   return isNaN(parsed) ? defaultValue : parsed;
 }
 
-// Reserved for future use
-// function getEnvBoolean(key: string, defaultValue: boolean): boolean {
-//     const value = process.env[key];
-//     if (value === undefined) return defaultValue;
-//     return value.toLowerCase() === 'true' || value === '1';
-// }
+function getEnvBoolean(key: string, defaultValue: boolean): boolean {
+  const value = process.env[key];
+  if (value === undefined) return defaultValue;
+  return value.toLowerCase() === 'true' || value === '1';
+}
 
 export function loadConfig(): AppConfig {
   const production = getEnvString('NODE_ENV', 'development') === 'production';
+  const debug = getEnvBoolean('SCION_API_DEBUG', false);
 
   return {
     port: getEnvNumber('PORT', 8080),
     host: getEnvString('HOST', '0.0.0.0'),
     production,
+    debug,
     hubApiUrl: getEnvString('HUB_API_URL', 'http://localhost:9810'),
 
     cors: {
@@ -67,11 +71,12 @@ export function loadConfig(): AppConfig {
     security: {
       csp: [
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline' https://cdn.webawesome.com",
-        "style-src 'self' 'unsafe-inline' https://cdn.webawesome.com https://fonts.googleapis.com",
-        "font-src 'self' https://fonts.gstatic.com https://cdn.webawesome.com",
+        // Allow Shoelace from jsdelivr CDN and Web Awesome
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.webawesome.com",
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.webawesome.com https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net https://cdn.webawesome.com",
         "img-src 'self' data: https:",
-        "connect-src 'self' ws: wss:",
+        "connect-src 'self' ws: wss: http://localhost:* http://127.0.0.1:*",
       ].join('; '),
       hstsMaxAge: production ? 31536000 : 0, // 1 year in production
     },

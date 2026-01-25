@@ -7,13 +7,14 @@
 import Koa from 'koa';
 import Router from '@koa/router';
 import cors from '@koa/cors';
+import bodyParser from 'koa-bodyparser';
 import serve from 'koa-static';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 import type { AppConfig } from './config.js';
 import { errorHandler, logger, security } from './middleware/index.js';
-import { healthRoutes, pageRoutes } from './routes/index.js';
+import { healthRoutes, pageRoutes, createApiRouter } from './routes/index.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -33,7 +34,7 @@ export function createApp(config: AppConfig): Koa {
   // Core middleware stack
   // Order matters: error handler should be first to catch all errors
   app.use(errorHandler());
-  app.use(logger());
+  app.use(logger(config));
   app.use(security(config));
   app.use(
     cors({
@@ -41,6 +42,9 @@ export function createApp(config: AppConfig): Koa {
       credentials: config.cors.credentials,
     })
   );
+
+  // Body parsing for JSON requests
+  app.use(bodyParser());
 
   // Static asset serving from public/ directory
   // Path is relative to compiled location: dist/server/server/app.js
@@ -57,6 +61,11 @@ export function createApp(config: AppConfig): Koa {
   // Mount health check routes
   router.use(healthRoutes.routes());
   router.use(healthRoutes.allowedMethods());
+
+  // Mount API proxy routes
+  const apiRouter = createApiRouter(config);
+  router.use('/api', apiRouter.routes());
+  router.use('/api', apiRouter.allowedMethods());
 
   // Mount SSR page routes (catch-all, should be last)
   router.use(pageRoutes.routes());
