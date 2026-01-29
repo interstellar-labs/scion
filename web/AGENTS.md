@@ -161,6 +161,8 @@ chmod 600 ~/.scion/dev-token
 npm run build && npm start
 ```
 
+For instructions on testing real OAuth providers locally, see [OAUTH_LOCAL_WALKTHROUGH.md](./OAUTH_LOCAL_WALKTHROUGH.md).
+
 The server will show a warning banner confirming dev auth is enabled with the auto-login user.
 
 See [dev-auth design](../.design/hosted/dev-auth.md) for the complete specification.
