@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -87,6 +90,47 @@ Examples:
 	RunE: runServerStart,
 }
 
+// portStatus represents the result of checking a port.
+type portStatus struct {
+	inUse        bool
+	isScionServer bool
+}
+
+// checkPort checks if a port is already bound and if it's a scion server.
+func checkPort(host string, port int) portStatus {
+	addr := fmt.Sprintf("%s:%d", host, port)
+	ln, err := net.Listen("tcp", addr)
+	if err == nil {
+		ln.Close()
+		return portStatus{inUse: false}
+	}
+
+	// Port is in use - check if it's a scion server by hitting the health endpoint
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://%s/healthz", addr))
+	if err != nil {
+		return portStatus{inUse: true, isScionServer: false}
+	}
+	defer resp.Body.Close()
+
+	// Check if the response looks like a scion health response
+	var health struct {
+		Status  string `json:"status"`
+		Version string `json:"version"`
+		Uptime  string `json:"uptime"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		return portStatus{inUse: true, isScionServer: false}
+	}
+
+	// If we got valid health response fields, it's a scion server
+	if health.Status != "" && health.Uptime != "" {
+		return portStatus{inUse: true, isScionServer: true}
+	}
+
+	return portStatus{inUse: true, isScionServer: false}
+}
+
 func runServerStart(cmd *cobra.Command, args []string) error {
 	// Load configuration
 	cfg, err := config.LoadGlobalConfig(serverConfigPath)
@@ -134,6 +178,26 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 	// Check if at least one server is enabled
 	if !enableHub && !cfg.RuntimeHost.Enabled {
 		return fmt.Errorf("no server components enabled; use --enable-hub or --enable-runtime-host")
+	}
+
+	// Check if server ports are already in use
+	if enableHub {
+		status := checkPort(cfg.Hub.Host, cfg.Hub.Port)
+		if status.inUse {
+			if status.isScionServer {
+				return fmt.Errorf("a scion server is already running on port %d\nUse 'scion server status' to check or 'scion server stop' to stop it", cfg.Hub.Port)
+			}
+			return fmt.Errorf("Hub port %d is already in use by another process", cfg.Hub.Port)
+		}
+	}
+	if cfg.RuntimeHost.Enabled {
+		status := checkPort(cfg.RuntimeHost.Host, cfg.RuntimeHost.Port)
+		if status.inUse {
+			if status.isScionServer {
+				return fmt.Errorf("a scion server is already running on port %d\nUse 'scion server status' to check or 'scion server stop' to stop it", cfg.RuntimeHost.Port)
+			}
+			return fmt.Errorf("Runtime Host port %d is already in use by another process", cfg.RuntimeHost.Port)
+		}
 	}
 
 	// Log debug mode status
