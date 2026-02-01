@@ -1,6 +1,8 @@
 # Scion Project Context
 
 ## Overview
+> **Note**: This project is currently in a pre-release/alpha stage.
+
 `scion` is a container-based orchestration platform designed to manage concurrent LLM-based code agents. It supports both a standalone local CLI mode and a distributed "Hosted" architecture where state is centralized in a Hub and agents execute on disparate Runtime Hosts (local Docker, remote servers, or Kubernetes clusters).
 
 ## System Goals
@@ -72,6 +74,7 @@
   2. The seeding logic in `pkg/config/init.go` uses `//go:embed` to package these files.
 - **Hub/Runtime Separation**: Ensure distinct separation between state management (Hub) and execution logic (Runtime Host).
 - **Harness Logic**: LLM-specific interactions should be encapsulated in `pkg/harness`.
+- **Refactoring**: Since the project is in alpha, refactoring that modifies or removes behavior does not require graceful deprecation.
 
 ## Project use of the scion tool itself
 Do not commit changes in the project's own `.scion` folder to git as part of committing progress on code and docs. These are managed and committed manually when template defaults are intentionally updated.
