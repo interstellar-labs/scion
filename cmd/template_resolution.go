@@ -229,18 +229,17 @@ func handleLocalOnlyTemplate(ctx context.Context, hubCtx *HubContext, localTempl
 	if noUpload {
 		return nil, fmt.Errorf("template '%s' exists locally but not on Hub, and --no-upload is set\n\n"+
 			"To upload this template, run:\n"+
-			"  scion template sync %s --from %s --harness <harness-type>\n\n"+
+			"  scion template sync %s\n\n"+
 			"Or use --upload-template to auto-upload during agent creation",
-			localTemplate.Name, localTemplate.Name, localTemplate.Path)
+			localTemplate.Name, localTemplate.Name)
 	}
 
 	// Determine harness type from template config
 	harnessType, err := detectHarnessType(localTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect harness type for template '%s': %w\n\n"+
-			"Please upload manually with explicit harness type:\n"+
-			"  scion template sync %s --from %s --harness <harness-type>",
-			localTemplate.Name, err, localTemplate.Name, localTemplate.Path)
+			"Please ensure the template has a valid scion-agent.json with a 'harness' field",
+			localTemplate.Name, err)
 	}
 
 	if uploadTemplate || autoConfirm {
@@ -516,7 +515,7 @@ func formatTemplateNotFoundError(name, grovePath string) error {
 
 	return fmt.Errorf("template '%s' not found\n\n"+
 		"Searched locations:\n%s\n\n"+
-		"To create this template:\n"+
-		"  scion template sync %s --from /path/to/template --scope grove --harness <harness-type>",
+		"To sync a local template to the Hub:\n"+
+		"  scion template sync %s",
 		name, strings.Join(locations, "\n"), name)
 }

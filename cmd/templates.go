@@ -141,93 +141,86 @@ var templatesUpdateDefaultCmd = &cobra.Command{
 
 // templatesSyncCmd creates or updates a template in the Hub (upsert).
 var templatesSyncCmd = &cobra.Command{
-	Use:   "sync <name>",
+	Use:   "sync <template>",
 	Short: "Create or update a template in the Hub (Hub only)",
 	Long: `Sync a local template to the Hub. Creates the template if it doesn't exist,
 or updates it if it does. This is an upsert operation.
 
+The harness type is automatically detected from the template's configuration file.
+Use the root --global flag to sync to global scope instead of grove scope.
+
 Examples:
-  # Sync a template from local .scion/templates/custom
-  scion template sync custom-claude --from .scion/templates/custom --harness claude
+  # Sync a local template to the Hub (grove scope by default)
+  scion templates sync custom-claude
 
-  # Sync with explicit scope
-  scion template sync my-template --from ./my-template --scope grove --harness claude`,
+  # Sync with global scope
+  scion --global templates sync custom-claude
+
+  # Sync with a different name on the Hub
+  scion templates sync custom-claude --name my-team-claude`,
 	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
-		fromPath, _ := cmd.Flags().GetString("from")
-		scopeFlag, _ := cmd.Flags().GetString("scope")
-		harnessFlag, _ := cmd.Flags().GetString("harness")
-
-		// Validate required flags
-		if fromPath == "" {
-			return fmt.Errorf("--from flag is required")
-		}
-		if harnessFlag == "" {
-			return fmt.Errorf("--harness flag is required")
-		}
-
-		// Resolve path
-		absPath, err := filepath.Abs(fromPath)
-		if err != nil {
-			return fmt.Errorf("failed to resolve path: %w", err)
-		}
-
-		// Verify directory exists
-		info, err := os.Stat(absPath)
-		if err != nil {
-			return fmt.Errorf("template path not found: %w", err)
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("template path must be a directory: %s", absPath)
-		}
-
-		// Check Hub availability
-		hubCtx, err := CheckHubAvailability(grovePath)
-		if err != nil {
-			return err
-		}
-		if hubCtx == nil {
-			return fmt.Errorf("Hub integration is not enabled. Use 'scion hub enable' first")
-		}
-
-		PrintUsingHub(hubCtx.Endpoint)
-
-		return syncTemplateToHub(hubCtx, name, absPath, scopeFlag, harnessFlag)
-	},
+	RunE: runTemplateSync,
 }
 
-// templatesPushCmd uploads local template files to an existing Hub template.
+// templatesPushCmd is a semantic alias for sync.
 var templatesPushCmd = &cobra.Command{
-	Use:   "push <name>",
-	Short: "Upload local template files to Hub (Hub only)",
-	Long: `Push local template changes to an existing template in the Hub.
+	Use:   "push <template>",
+	Short: "Upload local template to Hub (alias for sync)",
+	Long: `Push a local template to the Hub. This is a semantic alias for 'sync'.
 
 Examples:
-  # Push local template to Hub
-  scion template push custom-claude
+  # Push a local template to the Hub
+  scion templates push custom-claude
 
-  # Push from a specific path
-  scion template push custom-claude --from .scion/templates/custom`,
+  # Push with global scope
+  scion --global templates push custom-claude`,
 	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
-		fromPath, _ := cmd.Flags().GetString("from")
-
-		// Check Hub availability
-		hubCtx, err := CheckHubAvailability(grovePath)
-		if err != nil {
-			return err
-		}
-		if hubCtx == nil {
-			return fmt.Errorf("Hub integration is not enabled. Use 'scion hub enable' first")
-		}
-
-		PrintUsingHub(hubCtx.Endpoint)
-
-		return pushTemplateToHub(hubCtx, name, fromPath)
-	},
+	RunE: runTemplateSync,
 }
+
+// runTemplateSync implements the shared logic for sync and push commands.
+func runTemplateSync(cmd *cobra.Command, args []string) error {
+	localTemplateName := args[0]
+	hubName, _ := cmd.Flags().GetString("name")
+
+	// Determine scope from root's --global flag
+	scope := "grove"
+	if globalMode {
+		scope = "global"
+	}
+
+	// If no explicit Hub name, use the local template name
+	if hubName == "" {
+		hubName = localTemplateName
+	}
+
+	// Find the local template
+	tpl, err := config.FindTemplate(localTemplateName)
+	if err != nil {
+		return fmt.Errorf("template '%s' not found locally: %w", localTemplateName, err)
+	}
+
+	// Detect harness type from template config
+	harnessType, err := detectHarnessType(tpl)
+	if err != nil {
+		return fmt.Errorf("failed to detect harness type: %w\n\n"+
+			"Ensure the template has a valid scion-agent.json with a 'harness' field", err)
+	}
+
+	// Check Hub availability
+	hubCtx, err := CheckHubAvailability(grovePath)
+	if err != nil {
+		return err
+	}
+	if hubCtx == nil {
+		return fmt.Errorf("Hub integration is not enabled. Use 'scion hub enable' first")
+	}
+
+	PrintUsingHub(hubCtx.Endpoint)
+
+	return syncTemplateToHub(hubCtx, hubName, tpl.Path, scope, harnessType)
+}
+
 
 // templatesPullCmd downloads a template from the Hub.
 var templatesPullCmd = &cobra.Command{
@@ -381,136 +374,6 @@ func syncTemplateToHub(hubCtx *HubContext, name, localPath, scope, harnessType s
 	return nil
 }
 
-// pushTemplateToHub uploads files to an existing template.
-func pushTemplateToHub(hubCtx *HubContext, name, fromPath string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	// If no path provided, try to find the template locally
-	localPath := fromPath
-	if localPath == "" {
-		tpl, err := config.FindTemplate(name)
-		if err != nil {
-			return fmt.Errorf("template '%s' not found locally. Use --from to specify the path", name)
-		}
-		localPath = tpl.Path
-	} else {
-		var err error
-		localPath, err = filepath.Abs(fromPath)
-		if err != nil {
-			return fmt.Errorf("failed to resolve path: %w", err)
-		}
-	}
-
-	// Verify directory exists
-	info, err := os.Stat(localPath)
-	if err != nil {
-		return fmt.Errorf("template path not found: %w", err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("template path must be a directory: %s", localPath)
-	}
-
-	// Find the template in Hub
-	fmt.Printf("Looking up template '%s' in Hub...\n", name)
-
-	// List templates to find by name
-	listResp, err := hubCtx.Client.Templates().List(ctx, &hubclient.ListTemplatesOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to list templates: %w", err)
-	}
-
-	var template *hubclient.Template
-	for i := range listResp.Templates {
-		if listResp.Templates[i].Name == name || listResp.Templates[i].Slug == name {
-			template = &listResp.Templates[i]
-			break
-		}
-	}
-
-	if template == nil {
-		return fmt.Errorf("template '%s' not found in Hub. Use 'template sync' to create it first", name)
-	}
-
-	// Collect local files
-	fmt.Printf("Scanning template files in %s...\n", localPath)
-	files, err := hubclient.CollectFiles(localPath, nil)
-	if err != nil {
-		return fmt.Errorf("failed to scan template files: %w", err)
-	}
-	fmt.Printf("Found %d files\n", len(files))
-
-	// Build file upload request
-	fileReqs := make([]hubclient.FileUploadRequest, len(files))
-	for i, f := range files {
-		fileReqs[i] = hubclient.FileUploadRequest{
-			Path: f.Path,
-			Size: f.Size,
-		}
-	}
-
-	// Request upload URLs
-	fmt.Println("Requesting upload URLs...")
-	uploadResp, err := hubCtx.Client.Templates().RequestUploadURLs(ctx, template.ID, fileReqs)
-	if err != nil {
-		return fmt.Errorf("failed to get upload URLs: %w", err)
-	}
-
-	// Upload files
-	fmt.Printf("Uploading %d files...\n", len(uploadResp.UploadURLs))
-	for _, urlInfo := range uploadResp.UploadURLs {
-		var fileInfo *hubclient.FileInfo
-		for i := range files {
-			if files[i].Path == urlInfo.Path {
-				fileInfo = &files[i]
-				break
-			}
-		}
-		if fileInfo == nil {
-			continue
-		}
-
-		f, err := os.Open(fileInfo.FullPath)
-		if err != nil {
-			return fmt.Errorf("failed to open %s: %w", fileInfo.Path, err)
-		}
-
-		err = hubCtx.Client.Templates().UploadFile(ctx, urlInfo.URL, urlInfo.Method, urlInfo.Headers, f)
-		f.Close()
-		if err != nil {
-			return fmt.Errorf("failed to upload %s: %w", fileInfo.Path, err)
-		}
-		fmt.Printf("  Uploaded: %s\n", fileInfo.Path)
-	}
-
-	// Build manifest
-	manifest := &hubclient.TemplateManifest{
-		Version: "1.0",
-		Harness: template.Harness,
-		Files:   make([]hubclient.TemplateFile, len(files)),
-	}
-	for i, f := range files {
-		manifest.Files[i] = hubclient.TemplateFile{
-			Path: f.Path,
-			Size: f.Size,
-			Hash: f.Hash,
-			Mode: f.Mode,
-		}
-	}
-
-	// Finalize template
-	fmt.Println("Finalizing template...")
-	updated, err := hubCtx.Client.Templates().Finalize(ctx, template.ID, manifest)
-	if err != nil {
-		return fmt.Errorf("failed to finalize template: %w", err)
-	}
-
-	fmt.Printf("Template '%s' pushed successfully!\n", name)
-	fmt.Printf("  Content Hash: %s\n", updated.ContentHash)
-
-	return nil
-}
-
 // pullTemplateFromHub downloads a template from the Hub.
 func pullTemplateFromHub(hubCtx *HubContext, name, toPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -610,13 +473,11 @@ func init() {
 	// Flags for create command
 	templatesCreateCmd.Flags().StringP("harness", "H", "", "Harness type (e.g. gemini, claude)")
 
-	// Flags for sync command
-	templatesSyncCmd.Flags().String("from", "", "Source path for template files (required)")
-	templatesSyncCmd.Flags().String("scope", "grove", "Template scope (global, grove, user)")
-	templatesSyncCmd.Flags().StringP("harness", "H", "", "Harness type (required)")
+	// Flags for sync command (--global is inherited from root)
+	templatesSyncCmd.Flags().String("name", "", "Name for the template on the Hub (defaults to local template name)")
 
-	// Flags for push command
-	templatesPushCmd.Flags().String("from", "", "Source path for template files")
+	// Flags for push command (same as sync, since push is an alias)
+	templatesPushCmd.Flags().String("name", "", "Name for the template on the Hub (defaults to local template name)")
 
 	// Flags for pull command
 	templatesPullCmd.Flags().String("to", "", "Destination path for downloaded template")
@@ -639,25 +500,23 @@ func init() {
 		Args:  cobra.ExactArgs(1),
 		RunE:  templatesShowCmd.RunE,
 	})
-	// Add sync, push, pull to singular alias
+	// Add sync, push, pull to singular alias (--global is inherited from root)
 	syncAlias := &cobra.Command{
-		Use:   "sync <name>",
+		Use:   "sync <template>",
 		Short: "Create or update a template in the Hub (Hub only)",
 		Args:  cobra.ExactArgs(1),
-		RunE:  templatesSyncCmd.RunE,
+		RunE:  runTemplateSync,
 	}
-	syncAlias.Flags().String("from", "", "Source path for template files (required)")
-	syncAlias.Flags().String("scope", "grove", "Template scope (global, grove, user)")
-	syncAlias.Flags().StringP("harness", "H", "", "Harness type (required)")
+	syncAlias.Flags().String("name", "", "Name for the template on the Hub (defaults to local template name)")
 	templateCmd.AddCommand(syncAlias)
 
 	pushAlias := &cobra.Command{
-		Use:   "push <name>",
-		Short: "Upload local template files to Hub (Hub only)",
+		Use:   "push <template>",
+		Short: "Upload local template to Hub (alias for sync)",
 		Args:  cobra.ExactArgs(1),
-		RunE:  templatesPushCmd.RunE,
+		RunE:  runTemplateSync,
 	}
-	pushAlias.Flags().String("from", "", "Source path for template files")
+	pushAlias.Flags().String("name", "", "Name for the template on the Hub (defaults to local template name)")
 	templateCmd.AddCommand(pushAlias)
 
 	pullAlias := &cobra.Command{
