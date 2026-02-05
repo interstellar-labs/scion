@@ -620,10 +620,10 @@ Debug logging can be enabled globally or per-component via the `SCION_LOG_LEVEL=
 
 ### 9.3 GCP Cloud Logging Integration
 
-In production environments, logs are forwarded to Google Cloud Logging. To maintain a lightweight footprint, the system implements a custom `slog.Handler` that formats logs specifically for the Cloud Logging JSON schema.
+In production environments, logs are forwarded to Google Cloud Logging. To maintain a lightweight footprint, the system implements a custom `slog.Handler` that formats logs specifically for the Cloud Logging LogEntry schema. The handler will use the golang cloud logging libraries - set to simple log names of scion_hub and scion_host.
 
 - **Schema Mapping**: Map `slog` levels to GCP `severity` levels.
-- **Metadata**: Automatically include `logging.googleapis.com/labels` and `logging.googleapis.com/sourceLocation`.
+- **Metadata**: Automatically include `logging.googleapis.com/labels` and `logging.googleapis.com/sourceLocation`. Include labels for hostname for host_logs, as all hosts will write to a common logname.
 - **Trace Correlation**: If a trace context is present, include `logging.googleapis.com/trace` to link logs with traces in the Google Cloud Console.
 - **Reference**: The implementation follows the pattern established by [sloggcp](https://github.com/Permify/sloggcp).
 
