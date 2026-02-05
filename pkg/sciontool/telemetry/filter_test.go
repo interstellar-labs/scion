@@ -4,7 +4,11 @@ Copyright 2025 The Scion Authors.
 
 package telemetry
 
-import "testing"
+import (
+	"testing"
+
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+)
 
 func TestFilter_ShouldProcess(t *testing.T) {
 	tests := []struct {
@@ -122,5 +126,155 @@ func TestFilter_ShouldProcessSpan(t *testing.T) {
 	}
 	if !f.ShouldProcessSpan("public.span") {
 		t.Error("ShouldProcessSpan should allow public.span")
+	}
+}
+
+// Redactor tests
+
+func TestNewRedactor(t *testing.T) {
+	config := RedactionConfig{
+		Redact: []string{"prompt", "user.email"},
+		Hash:   []string{"session_id"},
+	}
+
+	r := NewRedactor(config)
+	if r == nil {
+		t.Fatal("NewRedactor returned nil")
+	}
+
+	if !r.ShouldRedact("prompt") {
+		t.Error("ShouldRedact should return true for 'prompt'")
+	}
+	if !r.ShouldRedact("user.email") {
+		t.Error("ShouldRedact should return true for 'user.email'")
+	}
+	if r.ShouldRedact("unknown") {
+		t.Error("ShouldRedact should return false for 'unknown'")
+	}
+
+	if !r.ShouldHash("session_id") {
+		t.Error("ShouldHash should return true for 'session_id'")
+	}
+	if r.ShouldHash("prompt") {
+		t.Error("ShouldHash should return false for 'prompt'")
+	}
+}
+
+func TestRedactor_NilSafe(t *testing.T) {
+	var r *Redactor
+
+	if r.ShouldRedact("anything") {
+		t.Error("nil Redactor should not redact")
+	}
+	if r.ShouldHash("anything") {
+		t.Error("nil Redactor should not hash")
+	}
+
+	// RedactProtoAttributes should return input unchanged
+	attrs := []*commonpb.KeyValue{
+		{Key: "test", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "value"}}},
+	}
+	result := r.RedactProtoAttributes(attrs)
+	if len(result) != 1 || result[0].Key != "test" {
+		t.Error("nil Redactor should return attributes unchanged")
+	}
+}
+
+func TestHashValue(t *testing.T) {
+	// SHA256 of "test" = 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+	hash := HashValue("test")
+	expected := "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+	if hash != expected {
+		t.Errorf("HashValue('test') = %s, want %s", hash, expected)
+	}
+
+	// Same input should always produce same output
+	hash2 := HashValue("test")
+	if hash != hash2 {
+		t.Error("HashValue should be deterministic")
+	}
+
+	// Different input should produce different output
+	hash3 := HashValue("test2")
+	if hash == hash3 {
+		t.Error("HashValue should produce different output for different input")
+	}
+}
+
+func TestRedactor_RedactProtoAttributes(t *testing.T) {
+	r := NewRedactor(RedactionConfig{
+		Redact: []string{"secret"},
+		Hash:   []string{"id"},
+	})
+
+	attrs := []*commonpb.KeyValue{
+		{Key: "secret", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "my-secret"}}},
+		{Key: "id", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "session-123"}}},
+		{Key: "public", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "hello"}}},
+	}
+
+	result := r.RedactProtoAttributes(attrs)
+
+	// Check secret is redacted
+	if getStringValue(result[0]) != "[REDACTED]" {
+		t.Errorf("secret should be redacted, got %s", getStringValue(result[0]))
+	}
+
+	// Check id is hashed (not the original value and not [REDACTED])
+	idValue := getStringValue(result[1])
+	if idValue == "session-123" {
+		t.Error("id should be hashed, not original")
+	}
+	if idValue == "[REDACTED]" {
+		t.Error("id should be hashed, not redacted")
+	}
+	// Verify it's a valid SHA256 hash (64 hex chars)
+	if len(idValue) != 64 {
+		t.Errorf("hashed id should be 64 chars, got %d", len(idValue))
+	}
+
+	// Check public is unchanged
+	if getStringValue(result[2]) != "hello" {
+		t.Errorf("public should be unchanged, got %s", getStringValue(result[2]))
+	}
+}
+
+func getStringValue(kv *commonpb.KeyValue) string {
+	if sv, ok := kv.Value.Value.(*commonpb.AnyValue_StringValue); ok {
+		return sv.StringValue
+	}
+	return ""
+}
+
+func TestRedactor_DefaultFields(t *testing.T) {
+	// Test that default fields are configured correctly
+	if len(DefaultRedactFields) == 0 {
+		t.Error("DefaultRedactFields should not be empty")
+	}
+	if len(DefaultHashFields) == 0 {
+		t.Error("DefaultHashFields should not be empty")
+	}
+
+	// Check expected defaults
+	foundPrompt := false
+	for _, f := range DefaultRedactFields {
+		if f == "prompt" {
+			foundPrompt = true
+			break
+		}
+	}
+	if !foundPrompt {
+		t.Error("DefaultRedactFields should contain 'prompt'")
+	}
+
+	foundSessionID := false
+	for _, f := range DefaultHashFields {
+		if f == "session_id" {
+			foundSessionID = true
+			break
+		}
+	}
+	if !foundSessionID {
+		t.Error("DefaultHashFields should contain 'session_id'")
 	}
 }

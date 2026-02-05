@@ -21,31 +21,30 @@ const (
 // debug enables DEBUG level logging.
 // useGCP formats logs for Google Cloud Logging.
 func Setup(component string, debug bool, useGCP bool) {
+	handler := createBaseHandler(component, debug, useGCP)
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+}
+
+// createBaseHandler creates the base slog handler for local logging.
+func createBaseHandler(component string, debug bool, useGCP bool) slog.Handler {
 	level := slog.LevelInfo
 	if debug || os.Getenv("SCION_LOG_LEVEL") == "debug" {
 		level = slog.LevelDebug
 	}
 
-	var handler slog.Handler
 	opts := &slog.HandlerOptions{
 		Level: level,
 	}
 
 	if useGCP {
-		handler = NewGCPHandler(os.Stdout, opts, component)
-	} else {
-		// Default to JSON handler for structured logging
-		opts.ReplaceAttr = func(groups []string, a slog.Attr) slog.Attr {
-			// Ensure component is always present if not already
-			return a
-		}
-		handler = slog.NewJSONHandler(os.Stdout, opts).WithAttrs([]slog.Attr{
-			slog.String(AttrComponent, component),
-		})
+		return NewGCPHandler(os.Stdout, opts, component)
 	}
 
-	logger := slog.New(handler)
-	slog.SetDefault(logger)
+	// Default to JSON handler for structured logging
+	return slog.NewJSONHandler(os.Stdout, opts).WithAttrs([]slog.Attr{
+		slog.String(AttrComponent, component),
+	})
 }
 
 // WithMetadata returns a context with the provided metadata attached as slog attributes.

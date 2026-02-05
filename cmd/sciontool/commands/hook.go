@@ -16,6 +16,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/sciontool/hooks/dialects"
 	"github.com/ptone/scion-agent/pkg/sciontool/hooks/handlers"
 	"github.com/ptone/scion-agent/pkg/sciontool/log"
+	"github.com/ptone/scion-agent/pkg/sciontool/telemetry"
 )
 
 var (
@@ -182,6 +183,14 @@ func processHookData(data []byte) error {
 	// Add Hub handler if configured
 	if hubHandler != nil {
 		processor.AddHandler(hubHandler.Handle)
+	}
+
+	// Add telemetry handler if telemetry is enabled
+	cfg := telemetry.LoadConfig()
+	if cfg != nil && cfg.Enabled {
+		redactor := telemetry.NewRedactor(cfg.Redaction)
+		telemetryHandler := handlers.NewTelemetryHandler(nil, redactor)
+		processor.AddHandler(telemetryHandler.Handle)
 	}
 
 	return processor.ProcessRaw(rawData, hookDialect)

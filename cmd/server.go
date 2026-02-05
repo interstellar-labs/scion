@@ -155,7 +155,18 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 		component = "scion-host"
 	}
 
-	logging.Setup(component, enableDebug, useGCP)
+	// Initialize OTel logging if configured
+	ctx := context.Background()
+	logProvider, logCleanup, err := logging.InitOTelLogging(ctx, logging.OTelConfig{})
+	if err != nil {
+		log.Printf("Warning: failed to initialize OTel logging: %v", err)
+	}
+	if logCleanup != nil {
+		defer logCleanup()
+	}
+
+	// Setup logging with optional OTel bridge
+	logging.SetupWithOTel(component, enableDebug, useGCP, logProvider)
 
 	// Load configuration
 	cfg, err := config.LoadGlobalConfig(serverConfigPath)

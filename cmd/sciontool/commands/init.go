@@ -125,6 +125,24 @@ func runInit(args []string) int {
 		lifecycleManager.RegisterHandler(eventName, loggingHandler.Handle)
 	}
 
+	// Create telemetry handler for hook-to-span conversion
+	// Note: The hook command is invoked separately by harnesses, so telemetry
+	// handler registration happens in hook.go. This handler is for lifecycle events.
+	var telemetryHandler *handlers.TelemetryHandler
+	if telemetryPipeline != nil && telemetryPipeline.Config() != nil {
+		redactor := telemetry.NewRedactor(telemetryPipeline.Config().Redaction)
+		// Create a TracerProvider from the exporter if configured
+		// For now, we use a noop tracer - the spans will be created locally
+		// and need to be sent via the OTLP receiver
+		telemetryHandler = handlers.NewTelemetryHandler(nil, redactor)
+		log.Info("Telemetry handler initialized for hook-to-span conversion")
+
+		// Register telemetry handler for lifecycle events
+		for _, eventName := range []string{hooks.EventPreStart, hooks.EventPostStart, hooks.EventPreStop, hooks.EventSessionEnd} {
+			lifecycleManager.RegisterHandler(eventName, telemetryHandler.Handle)
+		}
+	}
+
 	// Run pre-start hooks (after setup, before child process)
 	log.Info("Running pre-start hooks...")
 	if err := lifecycleManager.RunPreStart(); err != nil {

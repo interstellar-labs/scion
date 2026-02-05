@@ -34,6 +34,10 @@ const (
 	EnvFilterInclude = "SCION_TELEMETRY_FILTER_INCLUDE"
 	// EnvProjectID is the GCP project ID for the exporter.
 	EnvProjectID = "SCION_GCP_PROJECT_ID"
+	// EnvRedactFields is a comma-separated list of fields to redact.
+	EnvRedactFields = "SCION_TELEMETRY_REDACT"
+	// EnvHashFields is a comma-separated list of fields to hash.
+	EnvHashFields = "SCION_TELEMETRY_HASH"
 )
 
 // Default configuration values.
@@ -45,6 +49,12 @@ const (
 
 // Default event types to exclude for privacy.
 var DefaultFilterExclude = []string{"agent.user.prompt"}
+
+// Default fields to redact for privacy.
+var DefaultRedactFields = []string{"prompt", "user.email", "tool_output", "tool_input"}
+
+// Default fields to hash for privacy while maintaining correlation.
+var DefaultHashFields = []string{"session_id"}
 
 // Config holds the telemetry configuration.
 type Config struct {
@@ -66,6 +76,8 @@ type Config struct {
 	ProjectID string
 	// Filter contains the filtering configuration.
 	Filter FilterConfig
+	// Redaction contains the redaction/hashing configuration.
+	Redaction RedactionConfig
 }
 
 // FilterConfig holds include/exclude patterns for event filtering.
@@ -91,11 +103,25 @@ func LoadConfig() *Config {
 			Include: parseCSVEnv(EnvFilterInclude),
 			Exclude: parseCSVEnv(EnvFilterExclude),
 		},
+		Redaction: RedactionConfig{
+			Redact: parseCSVEnv(EnvRedactFields),
+			Hash:   parseCSVEnv(EnvHashFields),
+		},
 	}
 
 	// Apply default exclude list if not explicitly set
 	if len(cfg.Filter.Exclude) == 0 && os.Getenv(EnvFilterExclude) == "" {
 		cfg.Filter.Exclude = DefaultFilterExclude
+	}
+
+	// Apply default redact fields if not explicitly set
+	if len(cfg.Redaction.Redact) == 0 && os.Getenv(EnvRedactFields) == "" {
+		cfg.Redaction.Redact = DefaultRedactFields
+	}
+
+	// Apply default hash fields if not explicitly set
+	if len(cfg.Redaction.Hash) == 0 && os.Getenv(EnvHashFields) == "" {
+		cfg.Redaction.Hash = DefaultHashFields
 	}
 
 	return cfg
