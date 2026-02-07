@@ -252,9 +252,9 @@ func init() {
 	brokerStartCmd.Flags().BoolVar(&brokerStartAutoProvide, "auto-provide", false, "Automatically add as provider for new groves")
 
 	// Provide/withdraw flags
-	brokerProvideCmd.Flags().StringVar(&brokerGroveID, "grove", "", "Grove ID to add as provider for")
+	brokerProvideCmd.Flags().StringVar(&brokerGroveID, "grove", "", "Grove name or ID to add as provider for")
 	brokerProvideCmd.Flags().StringVar(&brokerBrokerID, "broker", "", "Broker name or ID to use (for remote broker operations)")
-	brokerWithdrawCmd.Flags().StringVar(&brokerGroveID, "grove", "", "Grove ID to remove as provider from")
+	brokerWithdrawCmd.Flags().StringVar(&brokerGroveID, "grove", "", "Grove name or ID to remove as provider from")
 	brokerWithdrawCmd.Flags().StringVar(&brokerBrokerID, "broker", "", "Broker name or ID to use (for remote broker operations)")
 }
 
@@ -707,7 +707,7 @@ func runBrokerProvide(cmd *cobra.Command, args []string) error {
 		// Use current grove
 		resolvedPath, isGlobal, err := config.ResolveGrovePath(grovePath)
 		if err != nil {
-			return fmt.Errorf("failed to resolve grove path: %w\n\nSpecify a grove with --grove <id>", err)
+			return fmt.Errorf("failed to resolve grove path: %w\n\nSpecify a grove with --grove <name-or-id>", err)
 		}
 
 		settings, err := config.LoadSettings(resolvedPath)
@@ -717,7 +717,7 @@ func runBrokerProvide(cmd *cobra.Command, args []string) error {
 
 		groveID = settings.GroveID
 		if groveID == "" {
-			return fmt.Errorf("current grove is not linked to the Hub.\n\nLink it first with: scion hub link\nOr specify a grove with --grove <id>")
+			return fmt.Errorf("current grove is not linked to the Hub.\n\nLink it first with: scion hub link\nOr specify a grove with --grove <name-or-id>")
 		}
 
 		// Get grove name for display
@@ -752,12 +752,13 @@ func runBrokerProvide(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// If we used grove ID from flag, fetch grove details for display
+	// If we used --grove flag, resolve grove by name or ID
 	if brokerGroveID != "" {
-		grove, err := client.Groves().Get(ctx, groveID)
+		grove, err := resolveGroveByNameOrID(ctx, client, brokerGroveID)
 		if err != nil {
-			return fmt.Errorf("failed to fetch grove: %w", err)
+			return fmt.Errorf("failed to find grove '%s': %w", brokerGroveID, err)
 		}
+		groveID = grove.ID
 		groveName = grove.Name
 	}
 
@@ -844,7 +845,7 @@ func runBrokerWithdraw(cmd *cobra.Command, args []string) error {
 		// Use current grove
 		resolvedPath, isGlobal, err := config.ResolveGrovePath(grovePath)
 		if err != nil {
-			return fmt.Errorf("failed to resolve grove path: %w\n\nSpecify a grove with --grove <id>", err)
+			return fmt.Errorf("failed to resolve grove path: %w\n\nSpecify a grove with --grove <name-or-id>", err)
 		}
 
 		settings, err := config.LoadSettings(resolvedPath)
@@ -854,7 +855,7 @@ func runBrokerWithdraw(cmd *cobra.Command, args []string) error {
 
 		groveID = settings.GroveID
 		if groveID == "" {
-			return fmt.Errorf("current grove is not linked to the Hub.\n\nSpecify a grove with --grove <id>")
+			return fmt.Errorf("current grove is not linked to the Hub.\n\nSpecify a grove with --grove <name-or-id>")
 		}
 
 		// Get grove name for display
@@ -889,12 +890,13 @@ func runBrokerWithdraw(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// If we used grove ID from flag, fetch grove details for display
+	// If we used --grove flag, resolve grove by name or ID
 	if brokerGroveID != "" {
-		grove, err := client.Groves().Get(ctx, groveID)
+		grove, err := resolveGroveByNameOrID(ctx, client, brokerGroveID)
 		if err != nil {
-			return fmt.Errorf("failed to fetch grove: %w", err)
+			return fmt.Errorf("failed to find grove '%s': %w", brokerGroveID, err)
 		}
+		groveID = grove.ID
 		groveName = grove.Name
 	}
 
@@ -1235,6 +1237,39 @@ type brokerStatusInfo struct {
 type brokerGroveStatus struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// resolveGroveByNameOrID resolves a grove identifier (name or ID) to a grove.
+// It first attempts to fetch by ID, and if that fails with a 404, tries to find by name.
+// Returns the grove if found, or an error if not found or multiple matches.
+func resolveGroveByNameOrID(ctx context.Context, client hubclient.Client, nameOrID string) (*hubclient.Grove, error) {
+	// First try to fetch by ID directly
+	grove, err := client.Groves().Get(ctx, nameOrID)
+	if err == nil {
+		return grove, nil
+	}
+
+	// If not a 404, return the error
+	if !apiclient.IsNotFoundError(err) {
+		return nil, err
+	}
+
+	// ID not found, try to find by name
+	resp, err := client.Groves().List(ctx, &hubclient.ListGrovesOptions{
+		Name: nameOrID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to search for grove by name: %w", err)
+	}
+
+	switch len(resp.Groves) {
+	case 0:
+		return nil, fmt.Errorf("grove '%s' not found", nameOrID)
+	case 1:
+		return &resp.Groves[0], nil
+	default:
+		return nil, fmt.Errorf("multiple groves found with name '%s' - please use the grove ID instead", nameOrID)
+	}
 }
 
 // resolveBrokerByNameOrID resolves a broker identifier (name or ID) to a broker.
