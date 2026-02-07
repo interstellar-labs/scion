@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ptone/scion-agent/pkg/brokercredentials"
 	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/harness"
 	"github.com/ptone/scion-agent/pkg/hubclient"
@@ -145,103 +146,159 @@ func promptHubRegistration(isGlobal bool) error {
 		return nil
 	}
 
-	// Prompt for registration
-	if hubsync.ShowInitRegistrationPrompt(autoConfirm) {
-		// Create Hub client and register
-		client, err := getHubClient(settings)
-		if err != nil {
-			return fmt.Errorf("failed to create Hub client: %w", err)
-		}
+	// Step 1: Prompt to link grove to Hub
+	if !hubsync.ShowInitRegistrationPrompt(autoConfirm) {
+		return nil
+	}
 
-		// Check health first
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := client.Health(ctx); err != nil {
-			return fmt.Errorf("Hub is not responding: %w", err)
-		}
+	// Create Hub client
+	client, err := getHubClient(settings)
+	if err != nil {
+		return fmt.Errorf("failed to create Hub client: %w", err)
+	}
 
-		// Get grove info
-		var groveName string
-		var gitRemote string
-		groveID := settings.GroveID
+	// Check health first
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.Health(ctx); err != nil {
+		return fmt.Errorf("Hub is not responding: %w", err)
+	}
 
-		if isGlobal {
-			groveName = "global"
+	// Get grove info
+	var groveName string
+	var gitRemote string
+	groveID := settings.GroveID
+
+	if isGlobal {
+		groveName = "global"
+	} else {
+		gitRemote = util.GetGitRemote()
+		if gitRemote != "" {
+			groveName = util.ExtractRepoName(gitRemote)
 		} else {
-			gitRemote = util.GetGitRemote()
-			if gitRemote != "" {
-				groveName = util.ExtractRepoName(gitRemote)
-			} else {
-				groveName = filepath.Base(filepath.Dir(resolvedPath))
+			groveName = filepath.Base(filepath.Dir(resolvedPath))
+		}
+	}
+
+	// Register grove without broker info first
+	req := &hubclient.RegisterGroveRequest{
+		ID:        groveID,
+		Name:      groveName,
+		GitRemote: util.NormalizeGitRemote(gitRemote),
+		Path:      resolvedPath,
+	}
+
+	ctxReg, cancelReg := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelReg()
+
+	resp, err := client.Groves().Register(ctxReg, req)
+	if err != nil {
+		return fmt.Errorf("registration failed: %w", err)
+	}
+
+	// Enable Hub integration
+	_ = config.UpdateSetting(resolvedPath, "hub.enabled", "true", isGlobal)
+
+	if resp.Created {
+		fmt.Printf("Created new grove on Hub: %s (ID: %s)\n", resp.Grove.Name, resp.Grove.ID)
+	} else {
+		fmt.Printf("Linked to existing grove on Hub: %s (ID: %s)\n", resp.Grove.Name, resp.Grove.ID)
+		// Update local grove_id to match the hub grove's ID
+		if resp.Grove.ID != groveID {
+			if err := config.UpdateSetting(resolvedPath, "grove_id", resp.Grove.ID, isGlobal); err != nil {
+				fmt.Printf("Warning: failed to update local grove_id: %v\n", err)
 			}
 		}
+		groveID = resp.Grove.ID
+	}
 
-		// Get hostname
-		brokerName, _ := os.Hostname()
-		if brokerName == "" {
-			brokerName = "local-host"
-		}
+	// Show any auto-provided brokers
+	ctxProviders, cancelProviders := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelProviders()
 
-		// Get existing broker ID if available
-		var existingBrokerID string
-		if settings.Hub != nil {
-			existingBrokerID = settings.Hub.BrokerID
-		}
-
-		// Register
-		req := &hubclient.RegisterGroveRequest{
-			ID:        groveID,
-			Name:      groveName,
-			GitRemote: util.NormalizeGitRemote(gitRemote),
-			Path:      resolvedPath,
-			Broker: &hubclient.BrokerInfo{
-				ID:   existingBrokerID,
-				Name: brokerName,
-			},
-		}
-
-		ctxReg, cancelReg := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancelReg()
-
-		resp, err := client.Groves().Register(ctxReg, req)
-		if err != nil {
-			return fmt.Errorf("registration failed: %w", err)
-		}
-
-		// Save broker credentials to GLOBAL settings only.
-		// These are broker-level credentials, not grove-specific.
-		globalDir, globalErr := config.GetGlobalDir()
-		if globalErr != nil {
-			fmt.Printf("Warning: failed to get global directory: %v\n", globalErr)
-		} else {
-			if resp.BrokerToken != "" {
-				_ = config.UpdateSetting(globalDir, "hub.brokerToken", resp.BrokerToken, true)
+	providersResp, err := client.Groves().ListProviders(ctxProviders, resp.Grove.ID)
+	if err == nil && providersResp != nil && len(providersResp.Providers) > 0 {
+		fmt.Println()
+		fmt.Println("Brokers providing for this grove:")
+		for _, p := range providersResp.Providers {
+			autoTag := ""
+			if p.Status == "online" {
+				autoTag = " (online)"
 			}
-			if resp.Broker != nil && resp.Broker.ID != "" {
-				_ = config.UpdateSetting(globalDir, "hub.brokerId", resp.Broker.ID, true)
-			}
+			fmt.Printf("  - %s%s\n", p.BrokerName, autoTag)
 		}
+	}
 
-		// Enable Hub integration
-		_ = config.UpdateSetting(resolvedPath, "hub.enabled", "true", isGlobal)
-
-		if resp.Created {
-			fmt.Printf("Created new grove on Hub: %s (ID: %s)\n", resp.Grove.Name, resp.Grove.ID)
-		} else {
-			fmt.Printf("Linked to existing grove on Hub: %s (ID: %s)\n", resp.Grove.Name, resp.Grove.ID)
-			// Update local grove_id to match the hub grove's ID
-			if resp.Grove.ID != groveID {
-				if err := config.UpdateSetting(resolvedPath, "grove_id", resp.Grove.ID, isGlobal); err != nil {
-					fmt.Printf("Warning: failed to update local grove_id: %v\n", err)
+	// Step 2: Check if this host is a registered broker and offer to add as provider
+	localBrokerID, localBrokerName := getLocalBrokerInfo(settings)
+	if localBrokerID != "" {
+		// Check if this broker is already a provider
+		alreadyProvider := false
+		if providersResp != nil {
+			for _, p := range providersResp.Providers {
+				if p.BrokerID == localBrokerID {
+					alreadyProvider = true
+					break
 				}
 			}
 		}
-		if resp.Broker != nil {
-			fmt.Printf("Host registered: %s (ID: %s)\n", resp.Broker.Name, resp.Broker.ID)
+
+		if !alreadyProvider {
+			fmt.Println()
+			if hubsync.ShowInitProvidePrompt(localBrokerName, resp.Grove.Name, autoConfirm) {
+				// Add this broker as a provider
+				ctxAdd, cancelAdd := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancelAdd()
+
+				addReq := &hubclient.AddProviderRequest{
+					BrokerID:  localBrokerID,
+					LocalPath: resolvedPath,
+				}
+
+				_, err := client.Groves().AddProvider(ctxAdd, resp.Grove.ID, addReq)
+				if err != nil {
+					fmt.Printf("Warning: failed to add broker as provider: %v\n", err)
+				} else {
+					fmt.Printf("Host registered as provider: %s\n", localBrokerName)
+				}
+			}
 		}
 	}
 
 	return nil
+}
+
+// getLocalBrokerInfo returns the local broker ID and name if this host is registered as a broker.
+func getLocalBrokerInfo(settings *config.Settings) (brokerID, brokerName string) {
+	// First check brokercredentials store
+	credStore := brokercredentials.NewStore("")
+	creds, err := credStore.Load()
+	if err == nil && creds != nil && creds.BrokerID != "" {
+		brokerID = creds.BrokerID
+	}
+
+	// Fall back to global settings
+	if brokerID == "" {
+		globalDir, err := config.GetGlobalDir()
+		if err == nil {
+			globalSettings, err := config.LoadSettings(globalDir)
+			if err == nil && globalSettings.Hub != nil && globalSettings.Hub.BrokerID != "" {
+				brokerID = globalSettings.Hub.BrokerID
+			}
+		}
+	}
+
+	// Get hostname for display
+	brokerName, _ = os.Hostname()
+	if brokerName == "" {
+		if brokerID != "" && len(brokerID) >= 8 {
+			brokerName = brokerID[:8]
+		} else {
+			brokerName = "local-host"
+		}
+	}
+
+	return brokerID, brokerName
 }
 
 func init() {

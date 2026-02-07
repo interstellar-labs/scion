@@ -89,7 +89,14 @@ func ShowRegistrationPrompt(groveName string, autoConfirm bool) bool {
 // ShowInitRegistrationPrompt displays the post-init registration prompt.
 // Returns true if the user confirms, false otherwise.
 func ShowInitRegistrationPrompt(autoConfirm bool) bool {
-	return ConfirmAction("Grove initialized. Register with Hub?", true, autoConfirm)
+	return ConfirmAction("Grove initialized. Link to Hub?", true, autoConfirm)
+}
+
+// ShowInitProvidePrompt displays a confirmation to add this broker as a provider.
+// Returns true if the user confirms, false otherwise.
+func ShowInitProvidePrompt(brokerName, groveName string, autoConfirm bool) bool {
+	fmt.Printf("This host (%s) is registered as a broker.\n", brokerName)
+	return ConfirmAction(fmt.Sprintf("Add as provider for '%s'?", groveName), true, autoConfirm)
 }
 
 // GroveChoice represents the user's choice when matching groves exist.
