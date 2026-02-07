@@ -76,45 +76,33 @@ gcloud compute ssh "${INSTANCE_NAME}" --zone="${ZONE}" --command '
         sudo apt-get install -y caddy
     fi
 
-    # 1. Stop existing service if running
+    # 1. Update code as scion user
+    echo "Updating repository..."
+    sudo -u scion sh -c "cd /home/scion/scion-agent && git pull"
+
+    # 2. Build binary as scion user from cmd/scion
+    echo "Building scion binary..."
+    sudo -u scion sh -c "cd /home/scion/scion-agent && /usr/local/go/bin/go build -o scion ./cmd/scion"
+    
+    # 3. Stop existing service if running
     if systemctl is-active --quiet scion-hub; then
         echo "Stopping existing scion-hub service..."
         sudo systemctl stop scion-hub
     fi
 
-    echo "=== Debug: Git Version Info ==="
-    echo "Current user ($(whoami)): $(git version) at $(which git)"
-    echo "Scion user: $(sudo -u scion git version) at $(sudo -u scion which git)"
-    echo "All git paths:"
-    whereis git
-    
-    # Try to find a git that is 2.47+ if the default one is not
-    GIT_BIN=$(which git)
-    if ! git version | grep -qE "git version 2\.(4[7-9]|[5-9][0-9])"; then
-        echo "Warning: Default git is old. Searching for newer git..."
-        for p in /usr/local/bin/git /usr/bin/git /bin/git; do
-            if [ -x "$p" ]; then
-                V=$("$p" version | cut -d" " -f3)
-                echo "Found $p with version $V"
-            fi
-        done
-    fi
-
-    # 2. Update code as scion user
-    echo "Updating repository..."
-    sudo -u scion sh -c "cd /home/scion/scion-agent && git pull"
-
-    # 3. Build binary as scion user from cmd/scion
-    echo "Building scion binary..."
-    sudo -u scion sh -c "cd /home/scion/scion-agent && /usr/local/go/bin/go build -o scion ./cmd/scion"
-    
     # 4. Install binary to /usr/local/bin
     sudo mv /home/scion/scion-agent/scion /usr/local/bin/scion
     sudo chmod +x /usr/local/bin/scion
 
-    # 5. Move systemd unit file
+    # 5. Move systemd unit file and reload if changed
     echo "Updating systemd unit file..."
-    sudo mv /tmp/scion-hub.service /etc/systemd/system/scion-hub.service
+    if ! diff -q /tmp/scion-hub.service /etc/systemd/system/scion-hub.service >/dev/null 2>&1; then
+        sudo mv /tmp/scion-hub.service /etc/systemd/system/scion-hub.service
+        echo "Reloading systemd daemon..."
+        sudo systemctl daemon-reload
+    else
+        echo "Systemd unit file unchanged."
+    fi
 
     echo "Debug: Service file content:"
     sudo systemctl cat scion-hub || true
@@ -128,14 +116,18 @@ gcloud compute ssh "${INSTANCE_NAME}" --zone="${ZONE}" --command '
 
     # 7. Configure Caddy
     echo "Updating Caddyfile..."
-    sudo mv /tmp/Caddyfile /etc/caddy/Caddyfile
-    sudo chown caddy:caddy /etc/caddy/Caddyfile
-    sudo chmod 644 /etc/caddy/Caddyfile
-    sudo systemctl restart caddy
+    if ! diff -q /tmp/Caddyfile /etc/caddy/Caddyfile >/dev/null 2>&1; then
+        sudo mv /tmp/Caddyfile /etc/caddy/Caddyfile
+        sudo chown caddy:caddy /etc/caddy/Caddyfile
+        sudo chmod 644 /etc/caddy/Caddyfile
+        echo "Restarting Caddy..."
+        sudo systemctl restart caddy
+    else
+        echo "Caddyfile unchanged."
+    fi
 
     # 8. Start the scion-hub service
     echo "Starting scion-hub service..."
-    sudo systemctl daemon-reload
     sudo systemctl enable scion-hub
     sudo systemctl start scion-hub
 
