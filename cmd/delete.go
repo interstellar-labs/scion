@@ -73,6 +73,12 @@ var deleteCmd = &cobra.Command{
 					continue // No container
 				}
 
+				// Get the canonical agent name from labels (Docker Names field has leading slash)
+				agentName := a.Labels["scion.name"]
+				if agentName == "" {
+					continue // Not a scion-managed container
+				}
+
 				status := strings.ToLower(a.ContainerStatus)
 				// Check if running
 				if strings.HasPrefix(status, "up") ||
@@ -82,23 +88,23 @@ var deleteCmd = &cobra.Command{
 					continue
 				}
 
-				fmt.Printf("Deleting stopped agent '%s' (status: %s)...\n", a.Name, a.ContainerStatus)
+				fmt.Printf("Deleting stopped agent '%s' (status: %s)...\n", agentName, a.ContainerStatus)
 
 				targetGrovePath := a.GrovePath
 				if targetGrovePath == "" {
 					targetGrovePath = grovePath
 				}
 
-				branchDeleted, err := mgr.Delete(context.Background(), a.Name, true, targetGrovePath, !preserveBranch)
+				branchDeleted, err := mgr.Delete(context.Background(), agentName, true, targetGrovePath, !preserveBranch)
 				if err != nil {
-					fmt.Printf("Failed to delete agent '%s': %v\n", a.Name, err)
+					fmt.Printf("Failed to delete agent '%s': %v\n", agentName, err)
 					continue
 				}
 
 				if branchDeleted {
-					fmt.Printf("Git branch associated with agent '%s' deleted.\n", a.Name)
+					fmt.Printf("Git branch associated with agent '%s' deleted.\n", agentName)
 				}
-				fmt.Printf("Agent '%s' deleted.\n", a.Name)
+				fmt.Printf("Agent '%s' deleted.\n", agentName)
 				deletedCount++
 			}
 
