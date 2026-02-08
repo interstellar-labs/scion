@@ -122,6 +122,7 @@ type AgentInfo struct {
 
 	// Hosted/distributed mode fields
 	RuntimeBrokerID   string `json:"runtimeBrokerId,omitempty"`   // ID of the Runtime Broker managing this agent
+	RuntimeBrokerName string `json:"runtimeBrokerName,omitempty"` // Name of the Runtime Broker
 	RuntimeBrokerType string `json:"runtimeBrokerType,omitempty"` // Type: docker, kubernetes, apple
 	RuntimeState    string `json:"runtimeState,omitempty"`    // Low-level runtime state
 	HubEndpoint     string `json:"hubEndpoint,omitempty"`     // Scion Hub URL if connected

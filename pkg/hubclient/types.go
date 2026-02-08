@@ -21,6 +21,7 @@ type Agent struct {
 	Detached        bool              `json:"detached,omitempty"`
 	Runtime         string            `json:"runtime,omitempty"`
 	RuntimeBrokerID   string            `json:"runtimeBrokerId,omitempty"`
+	RuntimeBrokerName string            `json:"runtimeBrokerName,omitempty"`
 	RuntimeBrokerType string            `json:"runtimeBrokerType,omitempty"`
 	WebPTYEnabled   bool              `json:"webPtyEnabled,omitempty"`
 	TaskSummary     string            `json:"taskSummary,omitempty"`

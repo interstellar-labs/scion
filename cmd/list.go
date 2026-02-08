@@ -116,32 +116,33 @@ func listAgentsViaHub(hubCtx *HubContext) error {
 // hubAgentToAgentInfo converts a Hub API Agent to a local AgentInfo
 func hubAgentToAgentInfo(a hubclient.Agent) api.AgentInfo {
 	info := api.AgentInfo{
-		ID:              a.ID,
-		AgentID:         a.AgentID,
-		Name:            a.Name,
-		Template:        a.Template,
-		Grove:           a.Grove,
-		GroveID:         a.GroveID,
-		Labels:          a.Labels,
-		Annotations:     a.Annotations,
-		Status:          a.Status,
-		ContainerStatus: a.ContainerStatus,
-		SessionStatus:   a.SessionStatus,
-		Image:           a.Image,
-		Detached:        a.Detached,
-		Runtime:         a.Runtime,
+		ID:                a.ID,
+		AgentID:           a.AgentID,
+		Name:              a.Name,
+		Template:          a.Template,
+		Grove:             a.Grove,
+		GroveID:           a.GroveID,
+		Labels:            a.Labels,
+		Annotations:       a.Annotations,
+		Status:            a.Status,
+		ContainerStatus:   a.ContainerStatus,
+		SessionStatus:     a.SessionStatus,
+		Image:             a.Image,
+		Detached:          a.Detached,
+		Runtime:           a.Runtime,
 		RuntimeBrokerID:   a.RuntimeBrokerID,
+		RuntimeBrokerName: a.RuntimeBrokerName,
 		RuntimeBrokerType: a.RuntimeBrokerType,
-		RuntimeState:    a.RuntimeState,
-		WebPTYEnabled:   a.WebPTYEnabled,
-		TaskSummary:     a.TaskSummary,
-		Created:         a.Created,
-		Updated:         a.Updated,
-		LastSeen:        a.LastSeen,
-		CreatedBy:       a.CreatedBy,
-		OwnerID:         a.OwnerID,
-		Visibility:      a.Visibility,
-		StateVersion:    a.StateVersion,
+		RuntimeState:      a.RuntimeState,
+		WebPTYEnabled:     a.WebPTYEnabled,
+		TaskSummary:       a.TaskSummary,
+		Created:           a.Created,
+		Updated:           a.Updated,
+		LastSeen:          a.LastSeen,
+		CreatedBy:         a.CreatedBy,
+		OwnerID:           a.OwnerID,
+		Visibility:        a.Visibility,
+		StateVersion:      a.StateVersion,
 	}
 
 	// Convert Kubernetes info if present
@@ -178,7 +179,7 @@ func displayAgents(agents []api.AgentInfo, all bool) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tTEMPLATE\tRUNTIME\tGROVE\tAGENT STATUS\tSESSION\tCONTAINER")
+	fmt.Fprintln(w, "NAME\tTEMPLATE\tRUNTIME\tGROVE\tBROKER\tAGENT STATUS\tSESSION\tCONTAINER")
 	for _, a := range agents {
 		agentStatus := a.Status
 		if agentStatus == "" {
@@ -192,7 +193,12 @@ func displayAgents(agents []api.AgentInfo, all bool) error {
 		if containerStatus == "created" && a.ID == "" {
 			containerStatus = "none"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, a.Runtime, a.Grove, agentStatus, sessionStatus, containerStatus)
+		// Use broker name if available, otherwise fall back to ID
+		broker := a.RuntimeBrokerName
+		if broker == "" {
+			broker = a.RuntimeBrokerID
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, a.Runtime, a.Grove, broker, agentStatus, sessionStatus, containerStatus)
 	}
 	w.Flush()
 	return nil

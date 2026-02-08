@@ -31,13 +31,17 @@ type Agent struct {
 	RuntimeState    string `json:"runtimeState,omitempty"`    // Low-level runtime state
 
 	// Runtime configuration
-	Image         string `json:"image,omitempty"`
-	Detached      bool   `json:"detached"`
-	Runtime       string `json:"runtime,omitempty"`       // docker, kubernetes, apple
-	RuntimeBrokerID string `json:"runtimeBrokerId,omitempty"` // FK to RuntimeBroker.ID
-	WebPTYEnabled bool   `json:"webPtyEnabled,omitempty"`
-	TaskSummary   string `json:"taskSummary,omitempty"`
-	Message       string `json:"message,omitempty"`
+	Image           string `json:"image,omitempty"`
+	Detached        bool   `json:"detached"`
+	Runtime         string `json:"runtime,omitempty"`           // docker, kubernetes, apple
+	RuntimeBrokerID string `json:"runtimeBrokerId,omitempty"`   // FK to RuntimeBroker.ID
+	WebPTYEnabled   bool   `json:"webPtyEnabled,omitempty"`
+	TaskSummary     string `json:"taskSummary,omitempty"`
+	Message         string `json:"message,omitempty"`
+
+	// Enriched fields (populated by Hub when returning data, not persisted)
+	Grove             string `json:"grove,omitempty"`             // Grove name (resolved from GroveID)
+	RuntimeBrokerName string `json:"runtimeBrokerName,omitempty"` // Broker name (resolved from RuntimeBrokerID)
 
 	// Applied configuration (stored as JSON)
 	AppliedConfig *AgentAppliedConfig `json:"appliedConfig,omitempty"`

@@ -188,6 +188,9 @@ func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enrich agents with grove and broker names
+	s.enrichAgents(ctx, result.Items)
+
 	writeJSON(w, http.StatusOK, ListAgentsResponse{
 		Agents:     result.Items,
 		NextCursor: result.NextCursor,
@@ -314,10 +317,110 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Enrich agent with grove and broker names for display
+	s.enrichAgent(ctx, agent, grove, nil)
+
 	writeJSON(w, http.StatusCreated, CreateAgentResponse{
 		Agent:    agent,
 		Warnings: warnings,
 	})
+}
+
+// enrichAgents populates Grove and RuntimeBrokerName fields for a slice of agents.
+// This provides human-readable names from the related IDs for display purposes.
+func (s *Server) enrichAgents(ctx context.Context, agents []store.Agent) {
+	if len(agents) == 0 {
+		return
+	}
+
+	// Collect unique grove and broker IDs
+	groveIDs := make(map[string]struct{})
+	brokerIDs := make(map[string]struct{})
+	for _, a := range agents {
+		if a.GroveID != "" {
+			groveIDs[a.GroveID] = struct{}{}
+		}
+		if a.RuntimeBrokerID != "" {
+			brokerIDs[a.RuntimeBrokerID] = struct{}{}
+		}
+	}
+
+	// Fetch groves
+	groveNames := make(map[string]string)
+	for id := range groveIDs {
+		if grove, err := s.store.GetGrove(ctx, id); err == nil {
+			groveNames[id] = grove.Name
+		}
+	}
+
+	// Fetch brokers
+	brokerInfo := make(map[string]*store.RuntimeBroker)
+	for id := range brokerIDs {
+		if broker, err := s.store.GetRuntimeBroker(ctx, id); err == nil {
+			brokerInfo[id] = broker
+		}
+	}
+
+	// Enrich agents
+	for i := range agents {
+		if name, ok := groveNames[agents[i].GroveID]; ok {
+			agents[i].Grove = name
+		}
+		if broker, ok := brokerInfo[agents[i].RuntimeBrokerID]; ok {
+			agents[i].RuntimeBrokerName = broker.Name
+			// Also populate Runtime if not already set (from broker's active profile)
+			if agents[i].Runtime == "" && len(broker.Profiles) > 0 {
+				for _, p := range broker.Profiles {
+					if p.Available {
+						agents[i].Runtime = p.Type
+						break
+					}
+				}
+			}
+		}
+	}
+}
+
+// enrichAgent populates Grove and RuntimeBrokerName fields for a single agent.
+// grove and broker parameters are optional pre-fetched values to avoid redundant lookups.
+func (s *Server) enrichAgent(ctx context.Context, agent *store.Agent, grove *store.Grove, broker *store.RuntimeBroker) {
+	if agent == nil {
+		return
+	}
+
+	// Populate grove name
+	if grove != nil {
+		agent.Grove = grove.Name
+	} else if agent.GroveID != "" {
+		if g, err := s.store.GetGrove(ctx, agent.GroveID); err == nil {
+			agent.Grove = g.Name
+		}
+	}
+
+	// Populate broker info
+	if broker != nil {
+		agent.RuntimeBrokerName = broker.Name
+		if agent.Runtime == "" && len(broker.Profiles) > 0 {
+			for _, p := range broker.Profiles {
+				if p.Available {
+					agent.Runtime = p.Type
+					break
+				}
+			}
+		}
+	} else if agent.RuntimeBrokerID != "" {
+		if b, err := s.store.GetRuntimeBroker(ctx, agent.RuntimeBrokerID); err == nil {
+			agent.RuntimeBrokerName = b.Name
+			if agent.Runtime == "" && len(b.Profiles) > 0 {
+				for _, p := range b.Profiles {
+					if p.Available {
+						agent.Runtime = p.Type
+						break
+					}
+				}
+			}
+		}
+	}
 }
 
 func (s *Server) handleAgentByID(w http.ResponseWriter, r *http.Request) {
@@ -367,11 +470,15 @@ func (s *Server) handleAgentByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getAgent(w http.ResponseWriter, r *http.Request, id string) {
-	agent, err := s.store.GetAgent(r.Context(), id)
+	ctx := r.Context()
+	agent, err := s.store.GetAgent(ctx, id)
 	if err != nil {
 		writeErrorFromErr(w, err, "")
 		return
 	}
+
+	// Enrich agent with grove and broker names
+	s.enrichAgent(ctx, agent, nil, nil)
 
 	writeJSON(w, http.StatusOK, agent)
 }
@@ -1228,6 +1335,9 @@ func (s *Server) listGroveAgents(w http.ResponseWriter, r *http.Request, groveID
 		return
 	}
 
+	// Enrich agents with grove and broker names
+	s.enrichAgents(ctx, result.Items)
+
 	writeJSON(w, http.StatusOK, ListAgentsResponse{
 		Agents:     result.Items,
 		NextCursor: result.NextCursor,
@@ -1351,6 +1461,9 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		}
 	}
 
+	// Enrich agent with grove and broker names for display
+	s.enrichAgent(ctx, agent, grove, nil)
+
 	writeJSON(w, http.StatusCreated, CreateAgentResponse{
 		Agent:    agent,
 		Warnings: warnings,
@@ -1381,6 +1494,9 @@ func (s *Server) getGroveAgent(w http.ResponseWriter, r *http.Request, groveID, 
 			return
 		}
 	}
+
+	// Enrich agent with grove and broker names
+	s.enrichAgent(ctx, agent, nil, nil)
 
 	writeJSON(w, http.StatusOK, agent)
 }

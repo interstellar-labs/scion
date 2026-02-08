@@ -126,10 +126,19 @@ func createAgentViaHub(hubCtx *HubContext, agentName string) error {
 		return wrapHubError(fmt.Errorf("failed to create agent via Hub: %w", err))
 	}
 
-	fmt.Printf("Agent '%s' created via Hub.\n", agentName)
 	if resp.Agent != nil {
+		// Show broker info if available
+		brokerInfo := ""
+		if resp.Agent.RuntimeBrokerName != "" {
+			brokerInfo = fmt.Sprintf(" on broker %s", resp.Agent.RuntimeBrokerName)
+		} else if resp.Agent.RuntimeBrokerID != "" {
+			brokerInfo = fmt.Sprintf(" on broker %s", resp.Agent.RuntimeBrokerID)
+		}
+		fmt.Printf("Agent '%s' created via Hub%s.\n", agentName, brokerInfo)
 		fmt.Printf("Agent ID: %s\n", resp.Agent.AgentID)
 		fmt.Printf("Status: %s\n", resp.Agent.Status)
+	} else {
+		fmt.Printf("Agent '%s' created via Hub.\n", agentName)
 	}
 	for _, w := range resp.Warnings {
 		fmt.Printf("Warning: %s\n", w)
