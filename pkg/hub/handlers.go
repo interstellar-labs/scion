@@ -2050,7 +2050,7 @@ type brokerGroveHeartbeat struct {
 
 // brokerAgentHeartbeat is per-agent status in a heartbeat.
 type brokerAgentHeartbeat struct {
-	AgentID         string `json:"agentId"`
+	Slug            string `json:"slug"`            // Agent's URL-safe identifier (name)
 	Status          string `json:"status"`          // Session status (IDLE, THINKING, etc.)
 	ContainerStatus string `json:"containerStatus,omitempty"`
 }
@@ -2074,7 +2074,7 @@ func (s *Server) handleBrokerHeartbeat(w http.ResponseWriter, r *http.Request, i
 	for _, grove := range heartbeat.Groves {
 		for _, agentHB := range grove.Agents {
 			// Look up the agent by name (slug) within the grove
-			agent, err := s.store.GetAgentBySlug(ctx, grove.GroveID, agentHB.AgentID)
+			agent, err := s.store.GetAgentBySlug(ctx, grove.GroveID, agentHB.Slug)
 			if err != nil {
 				// Agent not found in this grove - skip silently
 				// This can happen if the agent exists locally but isn't registered on the Hub
@@ -2116,7 +2116,7 @@ func (s *Server) handleBrokerHeartbeat(w http.ResponseWriter, r *http.Request, i
 				// Log error but continue processing other agents
 				slog.Error("Failed to update agent status from heartbeat",
 					"agentID", agent.ID,
-					"agentName", agentHB.AgentID,
+					"agentSlug", agentHB.Slug,
 					"groveID", grove.GroveID,
 					"error", err)
 			}

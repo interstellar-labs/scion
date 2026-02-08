@@ -237,7 +237,7 @@ func displayAgents(agents []api.AgentInfo, all bool, hubMode bool) error {
 	if hubMode {
 		fmt.Fprintln(w, "NAME\tTEMPLATE\tRUNTIME\tGROVE\tBROKER\tAGENT STATUS\tSESSION\tCONTAINER\tLAST SEEN")
 	} else {
-		fmt.Fprintln(w, "NAME\tTEMPLATE\tRUNTIME\tGROVE\tBROKER\tAGENT STATUS\tSESSION\tCONTAINER")
+		fmt.Fprintln(w, "NAME\tTEMPLATE\tRUNTIME\tGROVE\tAGENT STATUS\tSESSION\tCONTAINER")
 	}
 	for _, a := range agents {
 		agentStatus := a.Status
@@ -261,7 +261,7 @@ func displayAgents(agents []api.AgentInfo, all bool, hubMode bool) error {
 			lastSeen := formatLastSeen(a.LastSeen)
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, a.Runtime, a.Grove, broker, agentStatus, sessionStatus, containerStatus, lastSeen)
 		} else {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, a.Runtime, a.Grove, broker, agentStatus, sessionStatus, containerStatus)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, a.Runtime, a.Grove, agentStatus, sessionStatus, containerStatus)
 		}
 	}
 	w.Flush()

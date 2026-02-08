@@ -62,7 +62,9 @@ func (m *AgentManager) List(ctx context.Context, filter map[string]string) ([]ap
 				if err := json.Unmarshal(data, &info); err == nil {
 					agents[i].Status = info.Status
 					agents[i].SessionStatus = info.SessionStatus
-					agents[i].Runtime = info.Runtime
+					if info.Runtime != "" {
+						agents[i].Runtime = info.Runtime
+					}
 					agents[i].Profile = info.Profile
 				}
 			}
