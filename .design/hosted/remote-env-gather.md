@@ -84,9 +84,10 @@ CLI                          Hub                         Broker
    - Hub does NOT immediately dispatch to the Broker for execution.
 
 3. **Hub resolves its stored environment variables:**
-   - Queries global-scoped env vars.
+   - Queries global-scoped env vars (hub-wide defaults).
    - Queries grove-scoped env vars for the target grove.
-   - Deduplicates: grove-scoped values take precedence over global.
+   - Queries user-scoped env vars for the requesting user.
+   - Deduplicates with precedence: user > grove > global.
    - Prepares a `hub_env` map of resolved key-value pairs.
 
 4. **Hub dispatches "gather" request to Broker:**
@@ -116,14 +117,14 @@ CLI                          Hub                         Broker
      ```
      Environment variables for agent 'fooAgent':
        Broker provides: ANTHROPIC_API_KEY
-       Hub provides:    GITHUB_TOKEN (grove), DATADOG_API_KEY (global)
+       Hub provides:    GITHUB_TOKEN (user), DATADOG_API_KEY (grove), LOG_LEVEL (global)
        Found locally:   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
        Missing:         SLACK_WEBHOOK_URL
 
      Warning: 1 required variable is missing. Agent may fail to start.
 
-     Tip: Use 'scion hub env set SLACK_WEBHOOK_URL --grove' to store this
-          variable in the Hub for future agent starts.
+     Tip: Use 'scion hub env set SLACK_WEBHOOK_URL' to store this variable.
+          Scopes: --user (your account), --grove (this project), --global (hub-wide)
 
      Continue? [Y/n]:
      ```
@@ -177,7 +178,7 @@ type EnvGatherResponse struct {
 
 type EnvSource struct {
     Key   string `json:"key"`
-    Scope string `json:"scope"` // "global" or "grove"
+    Scope string `json:"scope"` // "global", "grove", or "user"
 }
 ```
 
@@ -249,8 +250,8 @@ Located in `cmd/start.go`:
 #### Hub Storage Hint
 When variables are missing, CLI should display a helpful message:
 ```
-Tip: Use 'scion hub env set <KEY> --grove' to store this variable
-     in the Hub for future agent starts.
+Tip: Use 'scion hub env set <KEY>' to store this variable in the Hub.
+     Scopes: --user (your account), --grove (this project), --global (hub-wide)
 ```
 
 ## 6. Implementation Details
@@ -258,10 +259,11 @@ Tip: Use 'scion hub env set <KEY> --grove' to store this variable
 ### 6.1. Hub-Side Env Resolution
 
 Before dispatching to the Broker, the Hub must:
-1. Query global-scoped env vars from storage.
+1. Query global-scoped env vars from storage (hub-wide defaults).
 2. Query grove-scoped env vars for the target grove.
-3. Merge with grove-scoped taking precedence over global.
-4. Track the scope of each resolved variable for reporting back to CLI.
+3. Query user-scoped env vars for the requesting user.
+4. Merge with precedence: user > grove > global.
+5. Track the scope of each resolved variable for reporting back to CLI.
 
 ### 6.2. Broker-Side Template Loading
 
@@ -280,9 +282,10 @@ When `gather_env: true` and CLI input is needed, the Hub creates an agent record
 Final environment merge order (highest priority last):
 1. Hub global-scoped env
 2. Hub grove-scoped env
-3. Broker's local environment
-4. CLI-gathered environment
-5. Agent config overrides
+3. Hub user-scoped env
+4. Broker's local environment
+5. CLI-gathered environment
+6. Agent config overrides
 
 Note: The Broker effectively "wins" over Hub for keys it has locally, but CLI-gathered values take final precedence to allow user overrides.
 
@@ -333,7 +336,7 @@ $ scion start analyzer --broker prod-k8s "analyze the auth module"
 
 Environment variables for agent 'analyzer':
   Broker provides: ANTHROPIC_API_KEY
-  Hub provides:    GITHUB_TOKEN (grove)
+  Hub provides:    GITHUB_TOKEN (user), DATADOG_API_KEY (grove)
 
 Starting agent 'analyzer' on broker 'prod-k8s'...
 Agent started successfully.
@@ -364,8 +367,8 @@ Environment variables for agent 'analyzer':
 
 Warning: 1 required variable is missing.
 
-Tip: Use 'scion hub env set GITHUB_TOKEN --grove' to store this
-     variable in the Hub for future agent starts.
+Tip: Use 'scion hub env set GITHUB_TOKEN' to store this variable in the Hub.
+     Scopes: --user (your account), --grove (this project), --global (hub-wide)
 
 Continue anyway? [y/N]: n
 Aborted.
@@ -383,8 +386,8 @@ Environment variables for agent 'analyzer':
 
 Warning: 1 required variable is missing.
 
-Tip: Use 'scion hub env set GITHUB_TOKEN --grove' to store this
-     variable in the Hub for future agent starts.
+Tip: Use 'scion hub env set GITHUB_TOKEN' to store this variable in the Hub.
+     Scopes: --user (your account), --grove (this project), --global (hub-wide)
 
 Starting agent anyway (--force specified)...
 Agent started successfully.
