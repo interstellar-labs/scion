@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 	"github.com/ptone/scion-agent/pkg/wsprotocol"
 )
@@ -180,51 +181,30 @@ func (s *LocalPTYSession) Run() error {
 	return err
 }
 
-// startDockerExec starts a docker exec session with tmux attach.
+// startDockerExec starts a docker exec session with tmux attach using a real PTY.
 func (s *LocalPTYSession) startDockerExec() error {
-	// For docker exec -it, we use os.Pipe and let docker handle PTY
-	// Docker exec -it will allocate a PTY on its side
-
-	// Create pipes for stdin/stdout
-	stdinReader, stdinWriter, err := os.Pipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdin pipe: %w", err)
-	}
-
-	stdoutReader, stdoutWriter, err := os.Pipe()
-	if err != nil {
-		stdinReader.Close()
-		stdinWriter.Close()
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	// Build docker exec command with PTY allocation
+	// Note: We don't use -t flag since pty.Start allocates the PTY for us
 	args := []string{
-		"exec", "-it",
+		"exec", "-i",
 		"--user", "scion",
 		s.containerID,
 		"tmux", "attach-session", "-t", "scion",
 	}
 
 	s.cmd = exec.CommandContext(s.ctx, "docker", args...)
-	s.cmd.Stdin = stdinReader
-	s.cmd.Stdout = stdoutWriter
-	s.cmd.Stderr = stdoutWriter
 
-	if err := s.cmd.Start(); err != nil {
-		stdinReader.Close()
-		stdinWriter.Close()
-		stdoutReader.Close()
-		stdoutWriter.Close()
-		return fmt.Errorf("failed to start docker exec: %w", err)
+	// Start with a real PTY - this provides proper terminal handling
+	ptmx, err := pty.StartWithSize(s.cmd, &pty.Winsize{
+		Cols: uint16(s.cols),
+		Rows: uint16(s.rows),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to start docker exec with PTY: %w", err)
 	}
 
-	// Close the ends we don't need
-	stdinReader.Close()
-	stdoutWriter.Close()
-
-	s.ptyMaster = stdinWriter
-	s.ptySlave = stdoutReader
+	// PTY master is used for both reading and writing
+	s.ptyMaster = ptmx
+	s.ptySlave = ptmx // Same fd for both directions with PTY
 
 	return nil
 }
@@ -342,11 +322,9 @@ func (h *StreamPTYHandler) Run() error {
 	}
 
 	defer func() {
+		// With real PTY, ptyMaster and ptySlave are the same fd, so only close once
 		if h.ptyMaster != nil {
 			h.ptyMaster.Close()
-		}
-		if h.ptySlave != nil {
-			h.ptySlave.Close()
 		}
 		if h.cmd != nil && h.cmd.Process != nil {
 			h.cmd.Process.Kill()
@@ -372,50 +350,36 @@ func (h *StreamPTYHandler) Run() error {
 }
 
 // startExec starts container exec with tmux attach using the configured runtime.
+// Uses a real PTY for proper terminal handling with both Docker and Apple runtimes.
 func (h *StreamPTYHandler) startDockerExec() error {
-	stdinReader, stdinWriter, err := os.Pipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdin pipe: %w", err)
-	}
-
-	stdoutReader, stdoutWriter, err := os.Pipe()
-	if err != nil {
-		stdinReader.Close()
-		stdinWriter.Close()
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
 	// Use the configured runtime command (docker, container, etc.)
 	runtimeCmd := h.runtimeCmd
 	if runtimeCmd == "" {
 		runtimeCmd = "docker"
 	}
 
+	// Note: We don't use -t flag since pty.Start allocates the PTY for us
 	args := []string{
-		"exec", "-it",
+		"exec", "-i",
 		"--user", "scion",
 		h.containerID,
 		"tmux", "attach-session", "-t", "scion",
 	}
 
 	h.cmd = exec.CommandContext(h.ctx, runtimeCmd, args...)
-	h.cmd.Stdin = stdinReader
-	h.cmd.Stdout = stdoutWriter
-	h.cmd.Stderr = stdoutWriter
 
-	if err := h.cmd.Start(); err != nil {
-		stdinReader.Close()
-		stdinWriter.Close()
-		stdoutReader.Close()
-		stdoutWriter.Close()
-		return fmt.Errorf("failed to start %s exec: %w", runtimeCmd, err)
+	// Start with a real PTY - this provides proper terminal handling
+	ptmx, err := pty.StartWithSize(h.cmd, &pty.Winsize{
+		Cols: uint16(h.cols),
+		Rows: uint16(h.rows),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to start %s exec with PTY: %w", runtimeCmd, err)
 	}
 
-	stdinReader.Close()
-	stdoutWriter.Close()
-
-	h.ptyMaster = stdinWriter
-	h.ptySlave = stdoutReader
+	// PTY master is used for both reading and writing
+	h.ptyMaster = ptmx
+	h.ptySlave = ptmx // Same fd for both directions with PTY
 
 	return nil
 }
@@ -465,11 +429,9 @@ func (h *StreamPTYHandler) readFromStream() error {
 // Close stops the PTY handler.
 func (h *StreamPTYHandler) Close() {
 	h.cancel()
+	// With real PTY, ptyMaster and ptySlave are the same fd, so only close once
 	if h.ptyMaster != nil {
 		h.ptyMaster.Close()
-	}
-	if h.ptySlave != nil {
-		h.ptySlave.Close()
 	}
 	if h.cmd != nil && h.cmd.Process != nil {
 		h.cmd.Process.Kill()
