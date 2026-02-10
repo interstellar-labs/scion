@@ -52,6 +52,7 @@ type HarnessOverride struct {
 	Env              map[string]string `json:"env,omitempty" yaml:"env,omitempty" koanf:"env"`
 	Volumes          []api.VolumeMount `json:"volumes,omitempty" yaml:"volumes,omitempty" koanf:"volumes"`
 	AuthSelectedType string            `json:"auth_selectedType,omitempty" yaml:"auth_selectedType,omitempty" koanf:"auth_selectedType"`
+	Resources        *api.ResourceSpec `json:"resources,omitempty" yaml:"resources,omitempty" koanf:"resources"`
 }
 
 type ProfileConfig struct {
@@ -59,6 +60,7 @@ type ProfileConfig struct {
 	Tmux             *bool                      `json:"tmux,omitempty" yaml:"tmux,omitempty" koanf:"tmux"`
 	Env              map[string]string          `json:"env,omitempty" yaml:"env,omitempty" koanf:"env"`
 	Volumes          []api.VolumeMount          `json:"volumes,omitempty" yaml:"volumes,omitempty" koanf:"volumes"`
+	Resources        *api.ResourceSpec          `json:"resources,omitempty" yaml:"resources,omitempty" koanf:"resources"`
 	HarnessOverrides map[string]HarnessOverride `json:"harness_overrides,omitempty" yaml:"harness_overrides,omitempty" koanf:"harness_overrides"`
 }
 
@@ -193,6 +195,35 @@ func (s *Settings) ResolveHarness(profileName, harnessName string) (HarnessConfi
 	}
 
 	return result, nil
+}
+
+// MergeResourceSpec merges resource specs field-by-field.
+// Override values take precedence over base values.
+func MergeResourceSpec(base, override *api.ResourceSpec) *api.ResourceSpec {
+	if override == nil {
+		return base
+	}
+	if base == nil {
+		cpy := *override
+		return &cpy
+	}
+	result := *base
+	if override.Requests.CPU != "" {
+		result.Requests.CPU = override.Requests.CPU
+	}
+	if override.Requests.Memory != "" {
+		result.Requests.Memory = override.Requests.Memory
+	}
+	if override.Limits.CPU != "" {
+		result.Limits.CPU = override.Limits.CPU
+	}
+	if override.Limits.Memory != "" {
+		result.Limits.Memory = override.Limits.Memory
+	}
+	if override.Disk != "" {
+		result.Disk = override.Disk
+	}
+	return &result
 }
 
 func mergeMaps(base, override map[string]string) map[string]string {
@@ -371,6 +402,9 @@ func MergeSettings(base *Settings, data []byte) error {
 			if v.Volumes != nil {
 				existing.Volumes = append(existing.Volumes, expandVolumeMounts(v.Volumes)...)
 			}
+			if v.Resources != nil {
+				existing.Resources = MergeResourceSpec(existing.Resources, v.Resources)
+			}
 			if v.HarnessOverrides != nil {
 				if existing.HarnessOverrides == nil {
 					existing.HarnessOverrides = make(map[string]HarnessOverride)
@@ -391,6 +425,9 @@ func MergeSettings(base *Settings, data []byte) error {
 					}
 					if hv.Volumes != nil {
 						hov.Volumes = append(hov.Volumes, expandVolumeMounts(hv.Volumes)...)
+					}
+					if hv.Resources != nil {
+						hov.Resources = MergeResourceSpec(hov.Resources, hv.Resources)
 					}
 					existing.HarnessOverrides[hk] = hov
 				}

@@ -267,6 +267,12 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 			}
 			return finalScionCfg.Volumes
 		}(),
+		Resources: func() *api.ResourceSpec {
+			if finalScionCfg != nil {
+				return finalScionCfg.Resources
+			}
+			return nil
+		}(),
 		Kubernetes: func() *api.KubernetesConfig {
 			if finalScionCfg != nil {
 				return finalScionCfg.Kubernetes

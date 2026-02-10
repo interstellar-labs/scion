@@ -240,7 +240,7 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 		finalScionCfg = config.MergeScionConfig(finalScionCfg, tplCfg)
 	}
 
-	// Merge settings env and auth if available
+	// Merge settings env, auth, and resources if available
 	if settings != nil && finalScionCfg.Harness != "" {
 		hConfig, err := settings.ResolveHarness(profileName, finalScionCfg.Harness)
 		if err == nil {
@@ -259,6 +259,29 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 			// Template has highest priority, so it should override settings.
 			// We construct a config with ONLY the settings env, then merge finalScionCfg over it.
 			finalScionCfg = config.MergeScionConfig(settingsCfg, finalScionCfg)
+		}
+
+		// Merge profile-level resources (lower priority than template/agent-level resources).
+		if rp := profileName; rp == "" {
+			rp = settings.ActiveProfile
+		}
+		if p, ok := settings.Profiles[profileName]; ok && p.Resources != nil {
+			if finalScionCfg.Resources == nil {
+				cpy := *p.Resources
+				finalScionCfg.Resources = &cpy
+			}
+			// Profile resources are base; template/agent resources override.
+			// Since finalScionCfg already has template resources merged,
+			// we merge profile as base under existing values.
+			merged := config.MergeResourceSpec(p.Resources, finalScionCfg.Resources)
+			finalScionCfg.Resources = merged
+		}
+
+		// Merge harness-override resources on top of everything.
+		if p, ok := settings.Profiles[profileName]; ok && p.HarnessOverrides != nil {
+			if ho, ok := p.HarnessOverrides[finalScionCfg.Harness]; ok && ho.Resources != nil {
+				finalScionCfg.Resources = config.MergeResourceSpec(finalScionCfg.Resources, ho.Resources)
+			}
 		}
 	}
 

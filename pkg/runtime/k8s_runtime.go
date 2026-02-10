@@ -35,6 +35,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/mutagen"
 	"golang.org/x/term"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -286,6 +287,50 @@ func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) *corev1
 			},
 			RestartPolicy: corev1.RestartPolicyNever,
 		},
+	}
+
+	// Apply resource requests/limits from the common resource spec.
+	if config.Resources != nil {
+		reqs := corev1.ResourceList{}
+		limits := corev1.ResourceList{}
+		if config.Resources.Requests.CPU != "" {
+			reqs[corev1.ResourceCPU] = resource.MustParse(config.Resources.Requests.CPU)
+		}
+		if config.Resources.Requests.Memory != "" {
+			reqs[corev1.ResourceMemory] = resource.MustParse(config.Resources.Requests.Memory)
+		}
+		if config.Resources.Limits.CPU != "" {
+			limits[corev1.ResourceCPU] = resource.MustParse(config.Resources.Limits.CPU)
+		}
+		if config.Resources.Limits.Memory != "" {
+			limits[corev1.ResourceMemory] = resource.MustParse(config.Resources.Limits.Memory)
+		}
+		if config.Resources.Disk != "" {
+			reqs[corev1.ResourceEphemeralStorage] = resource.MustParse(config.Resources.Disk)
+		}
+		if len(reqs) > 0 || len(limits) > 0 {
+			pod.Spec.Containers[0].Resources = corev1.ResourceRequirements{
+				Requests: reqs,
+				Limits:   limits,
+			}
+		}
+	}
+
+	// Merge Kubernetes-specific resources on top (supports extended resources like GPUs).
+	if config.Kubernetes != nil && config.Kubernetes.Resources != nil {
+		res := &pod.Spec.Containers[0].Resources
+		if res.Requests == nil {
+			res.Requests = corev1.ResourceList{}
+		}
+		if res.Limits == nil {
+			res.Limits = corev1.ResourceList{}
+		}
+		for k, v := range config.Kubernetes.Resources.Requests {
+			res.Requests[corev1.ResourceName(k)] = resource.MustParse(v)
+		}
+		for k, v := range config.Kubernetes.Resources.Limits {
+			res.Limits[corev1.ResourceName(k)] = resource.MustParse(v)
+		}
 	}
 
 	// Process Volumes (specifically GCS)

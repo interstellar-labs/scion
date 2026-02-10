@@ -24,6 +24,7 @@ import (
 
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/gcp"
+	"github.com/ptone/scion-agent/pkg/util"
 )
 
 type DockerRuntime struct {
@@ -50,6 +51,32 @@ func (r *DockerRuntime) Run(ctx context.Context, config RunConfig) (string, erro
 	// sciontool already handles PID 1 responsibilities (zombie reaping, signal forwarding),
 	// so we don't use --init to avoid competing init processes.
 	newArgs := []string{"run", "-t"}
+
+	// Apply resource constraints from config.
+	if config.Resources != nil {
+		if config.Resources.Limits.Memory != "" {
+			bytes, err := util.ParseMemory(config.Resources.Limits.Memory)
+			if err != nil {
+				return "", fmt.Errorf("invalid memory limit %q: %w", config.Resources.Limits.Memory, err)
+			}
+			newArgs = append(newArgs, "--memory", util.FormatMemoryForDocker(bytes))
+		}
+		if config.Resources.Requests.Memory != "" {
+			bytes, err := util.ParseMemory(config.Resources.Requests.Memory)
+			if err != nil {
+				return "", fmt.Errorf("invalid memory request %q: %w", config.Resources.Requests.Memory, err)
+			}
+			newArgs = append(newArgs, "--memory-reservation", util.FormatMemoryForDocker(bytes))
+		}
+		if config.Resources.Limits.CPU != "" {
+			cores, err := util.ParseCPU(config.Resources.Limits.CPU)
+			if err != nil {
+				return "", fmt.Errorf("invalid cpu limit %q: %w", config.Resources.Limits.CPU, err)
+			}
+			newArgs = append(newArgs, "--cpus", util.FormatCPU(cores))
+		}
+	}
+
 	newArgs = append(newArgs, args[1:]...)
 
 	out, err := runSimpleCommand(ctx, r.Command, newArgs...)

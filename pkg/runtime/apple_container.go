@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/ptone/scion-agent/pkg/api"
+	"github.com/ptone/scion-agent/pkg/util"
 )
 
 type AppleContainerRuntime struct {
@@ -47,8 +48,39 @@ func (r *AppleContainerRuntime) Run(ctx context.Context, config RunConfig) (stri
 
 	// For Apple Container, we want to ensure -d and -t are present for 'run'
 	// matching the working manual command.
-	// We also increase default memory to 2G.
-	newArgs := []string{"run", "-d", "-t", "-m", "2G"}
+	newArgs := []string{"run", "-d", "-t"}
+
+	// Apply resource constraints from config, falling back to defaults.
+	memFlag := "2G" // default
+	if config.Resources != nil {
+		mem := config.Resources.Limits.Memory
+		if mem == "" {
+			mem = config.Resources.Requests.Memory
+		}
+		if mem != "" {
+			bytes, err := util.ParseMemory(mem)
+			if err != nil {
+				return "", fmt.Errorf("invalid memory resource %q: %w", mem, err)
+			}
+			memFlag = util.FormatMemoryForApple(bytes)
+		}
+	}
+	newArgs = append(newArgs, "-m", memFlag)
+
+	if config.Resources != nil {
+		cpuStr := config.Resources.Limits.CPU
+		if cpuStr == "" {
+			cpuStr = config.Resources.Requests.CPU
+		}
+		if cpuStr != "" {
+			cores, err := util.ParseCPU(cpuStr)
+			if err != nil {
+				return "", fmt.Errorf("invalid cpu resource %q: %w", cpuStr, err)
+			}
+			newArgs = append(newArgs, "-c", util.FormatCPU(cores))
+		}
+	}
+
 	// Skip the original 'run', '-d', and '-i' from buildCommonRunArgs (indices 0, 1, 2)
 	newArgs = append(newArgs, args[3:]...)
 

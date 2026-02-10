@@ -49,6 +49,20 @@ type K8sResources struct {
 	Limits   map[string]string `json:"limits,omitempty" yaml:"limits,omitempty"`
 }
 
+// ResourceSpec defines compute resource requirements for an agent container.
+// It follows Kubernetes resource model conventions.
+type ResourceSpec struct {
+	Requests ResourceList `json:"requests,omitempty" yaml:"requests,omitempty"`
+	Limits   ResourceList `json:"limits,omitempty" yaml:"limits,omitempty"`
+	Disk     string       `json:"disk,omitempty" yaml:"disk,omitempty"`
+}
+
+// ResourceList is a set of resource name/quantity pairs.
+type ResourceList struct {
+	CPU    string `json:"cpu,omitempty" yaml:"cpu,omitempty"`
+	Memory string `json:"memory,omitempty" yaml:"memory,omitempty"`
+}
+
 type GeminiConfig struct {
 	AuthSelectedType string `json:"auth_selectedType,omitempty" yaml:"auth_selectedType,omitempty"`
 }
@@ -63,6 +77,7 @@ type ScionConfig struct {
 	Model       string            `json:"model,omitempty" yaml:"model,omitempty"`
 	Kubernetes  *KubernetesConfig `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
 	Gemini      *GeminiConfig     `json:"gemini,omitempty" yaml:"gemini,omitempty"`
+	Resources   *ResourceSpec     `json:"resources,omitempty" yaml:"resources,omitempty"`
 	Image       string            `json:"image,omitempty" yaml:"image,omitempty"`
 
 	// Info contains persisted metadata about the agent

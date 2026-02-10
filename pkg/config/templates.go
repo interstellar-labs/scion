@@ -471,6 +471,9 @@ func MergeScionConfig(base, override *api.ScionConfig) *api.ScionConfig {
 			}
 		}
 	}
+	if override.Resources != nil {
+		result.Resources = MergeResourceSpec(result.Resources, override.Resources)
+	}
 	if override.Gemini != nil {
 		if result.Gemini == nil {
 			result.Gemini = &api.GeminiConfig{}

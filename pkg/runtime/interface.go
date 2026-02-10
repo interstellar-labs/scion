@@ -38,6 +38,7 @@ type RunConfig struct {
 	Task         string
 	CommandArgs  []string
 	Resume       bool
+	Resources    *api.ResourceSpec
 	Kubernetes   *api.KubernetesConfig
 }
 
