@@ -192,8 +192,19 @@ func runInit(args []string) int {
 
 	// Read and start sidecar services
 	var svcManager *services.Manager
-	home := os.Getenv("HOME")
-	servicesPath := filepath.Join(home, ".scion", "scion-services.yaml")
+	// Resolve the scion user's home directory for service config.
+	// We cannot use os.Getenv("HOME") because init runs as root (HOME=/root),
+	// but the services file is written to the scion user's home during provisioning.
+	agentHome := os.Getenv("HOME")
+	if targetUID != 0 {
+		if scionUser, err := user.LookupId(strconv.Itoa(targetUID)); err == nil {
+			agentHome = scionUser.HomeDir
+		} else {
+			log.Debug("Could not look up user for UID %d: %v", targetUID, err)
+		}
+	}
+	servicesPath := filepath.Join(agentHome, ".scion", "scion-services.yaml")
+	log.Debug("Looking for services config at: %s", servicesPath)
 	if data, err := os.ReadFile(servicesPath); err == nil {
 		var specs []api.ServiceSpec
 		if err := yaml.Unmarshal(data, &specs); err != nil {
