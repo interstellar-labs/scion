@@ -234,15 +234,19 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Add Hub authentication credentials if provided
-	// These enable the agent (via sciontool) to authenticate with the Hub.
+	// Add Hub authentication credentials for the agent.
 	// Uses SCION_SERVER_AUTH_DEV_TOKEN which maps to the non-deprecated
-	// server.auth.dev_token setting (SCION_HUB_TOKEN mapped to the
-	// deprecated hub.token setting).
-	if req.AgentToken != "" {
-		env["SCION_SERVER_AUTH_DEV_TOKEN"] = req.AgentToken
+	// server.auth.dev_token setting.
+	// Priority: explicit agent token from dispatcher > broker's own dev token.
+	if agentToken := req.AgentToken; agentToken != "" {
+		env["SCION_SERVER_AUTH_DEV_TOKEN"] = agentToken
 		if s.config.Debug {
-			slog.Debug("SCION_SERVER_AUTH_DEV_TOKEN set", "length", len(req.AgentToken))
+			slog.Debug("SCION_SERVER_AUTH_DEV_TOKEN set from agent token", "length", len(agentToken))
+		}
+	} else if devToken := os.Getenv("SCION_SERVER_AUTH_DEV_TOKEN"); devToken != "" {
+		env["SCION_SERVER_AUTH_DEV_TOKEN"] = devToken
+		if s.config.Debug {
+			slog.Debug("SCION_SERVER_AUTH_DEV_TOKEN set from broker env", "length", len(devToken))
 		}
 	}
 	// Set Hub URL with priority:
