@@ -235,11 +235,14 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add Hub authentication credentials if provided
-	// These enable the agent (via sciontool) to authenticate with the Hub
+	// These enable the agent (via sciontool) to authenticate with the Hub.
+	// Uses SCION_SERVER_AUTH_DEV_TOKEN which maps to the non-deprecated
+	// server.auth.dev_token setting (SCION_HUB_TOKEN mapped to the
+	// deprecated hub.token setting).
 	if req.AgentToken != "" {
-		env["SCION_HUB_TOKEN"] = req.AgentToken
+		env["SCION_SERVER_AUTH_DEV_TOKEN"] = req.AgentToken
 		if s.config.Debug {
-			slog.Debug("SCION_HUB_TOKEN set", "length", len(req.AgentToken))
+			slog.Debug("SCION_SERVER_AUTH_DEV_TOKEN set", "length", len(req.AgentToken))
 		}
 	}
 	// Set Hub URL with priority:
@@ -303,7 +306,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	if s.config.Debug {
 		slog.Debug("Final environment count", "count", len(env))
 		for k, v := range env {
-			if k == "SCION_HUB_TOKEN" {
+			if k == "SCION_SERVER_AUTH_DEV_TOKEN" {
 				slog.Debug("  ENV", "key", k, "value", "<redacted>")
 			} else {
 				slog.Debug("  ENV", "key", k, "value", v)
