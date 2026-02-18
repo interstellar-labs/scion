@@ -216,8 +216,8 @@ func TestSeedAgnosticTemplate(t *testing.T) {
 		t.Fatalf("SeedAgnosticTemplate failed: %v", err)
 	}
 
-	// Verify all expected files exist
-	expectedFiles := []string{"scion-agent.yaml", "agents.md", "system-prompt.md"}
+	// Verify all expected files exist (including home/ directory files)
+	expectedFiles := []string{"scion-agent.yaml", "agents.md", "system-prompt.md", "home/.tmux.conf", "home/.zshrc"}
 	for _, f := range expectedFiles {
 		path := filepath.Join(targetDir, f)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -248,6 +248,11 @@ func TestSeedAgnosticTemplate_NoOverwrite(t *testing.T) {
 	customContent := "custom content"
 	os.WriteFile(filepath.Join(targetDir, "agents.md"), []byte(customContent), 0644)
 
+	// Write a custom home/.tmux.conf
+	homeDir := filepath.Join(targetDir, "home")
+	os.MkdirAll(homeDir, 0755)
+	os.WriteFile(filepath.Join(homeDir, ".tmux.conf"), []byte(customContent), 0644)
+
 	// Seed without force — should not overwrite
 	if err := SeedAgnosticTemplate(targetDir, false); err != nil {
 		t.Fatalf("SeedAgnosticTemplate failed: %v", err)
@@ -260,14 +265,26 @@ func TestSeedAgnosticTemplate_NoOverwrite(t *testing.T) {
 	if string(data) != customContent {
 		t.Error("SeedAgnosticTemplate overwrote existing file when force=false")
 	}
+
+	// Verify home/.tmux.conf was not overwritten either
+	data, err = os.ReadFile(filepath.Join(homeDir, ".tmux.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != customContent {
+		t.Error("SeedAgnosticTemplate overwrote home/.tmux.conf when force=false")
+	}
 }
 
 func TestSeedAgnosticTemplate_ForceOverwrite(t *testing.T) {
 	targetDir := filepath.Join(t.TempDir(), "default")
 	os.MkdirAll(targetDir, 0755)
 
-	// Write a custom file first
+	// Write custom files first
 	os.WriteFile(filepath.Join(targetDir, "agents.md"), []byte("custom"), 0644)
+	homeDir := filepath.Join(targetDir, "home")
+	os.MkdirAll(homeDir, 0755)
+	os.WriteFile(filepath.Join(homeDir, ".tmux.conf"), []byte("custom"), 0644)
 
 	// Seed with force — should overwrite
 	if err := SeedAgnosticTemplate(targetDir, true); err != nil {
@@ -280,6 +297,15 @@ func TestSeedAgnosticTemplate_ForceOverwrite(t *testing.T) {
 	}
 	if string(data) == "custom" {
 		t.Error("SeedAgnosticTemplate did not overwrite existing file when force=true")
+	}
+
+	// Verify home/.tmux.conf was also overwritten
+	data, err = os.ReadFile(filepath.Join(homeDir, ".tmux.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) == "custom" {
+		t.Error("SeedAgnosticTemplate did not overwrite home/.tmux.conf when force=true")
 	}
 }
 
@@ -298,9 +324,9 @@ func TestInitProject_SeedsAgnosticTemplate(t *testing.T) {
 		t.Fatalf("InitProject failed: %v", err)
 	}
 
-	// Verify default agnostic template was created
+	// Verify default agnostic template was created (including home/ files)
 	defaultTplDir := filepath.Join(projectDir, "templates", "default")
-	expectedFiles := []string{"scion-agent.yaml", "agents.md", "system-prompt.md"}
+	expectedFiles := []string{"scion-agent.yaml", "agents.md", "system-prompt.md", "home/.tmux.conf", "home/.zshrc"}
 	for _, f := range expectedFiles {
 		path := filepath.Join(defaultTplDir, f)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -356,9 +382,9 @@ func TestInitMachine_SeedsAll(t *testing.T) {
 		t.Error("expected settings.yaml to exist in global directory")
 	}
 
-	// Verify default agnostic template was created
+	// Verify default agnostic template was created (including home/ files)
 	defaultTplDir := filepath.Join(globalDir, "templates", "default")
-	expectedFiles := []string{"scion-agent.yaml", "agents.md", "system-prompt.md"}
+	expectedFiles := []string{"scion-agent.yaml", "agents.md", "system-prompt.md", "home/.tmux.conf", "home/.zshrc"}
 	for _, f := range expectedFiles {
 		path := filepath.Join(defaultTplDir, f)
 		if _, err := os.Stat(path); os.IsNotExist(err) {

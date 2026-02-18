@@ -242,6 +242,51 @@ func TestBuildManifest(t *testing.T) {
 	}
 }
 
+func TestManifestBuilder_IncludesDotfiles(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a home/.tmux.conf dotfile
+	homeDir := filepath.Join(dir, "home")
+	if err := os.MkdirAll(homeDir, 0755); err != nil {
+		t.Fatalf("failed to create home dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeDir, ".tmux.conf"), []byte("set -g mouse on"), 0644); err != nil {
+		t.Fatalf("failed to create .tmux.conf: %v", err)
+	}
+
+	// Create a regular file too
+	if err := os.WriteFile(filepath.Join(dir, "scion-agent.yaml"), []byte("name: test"), 0644); err != nil {
+		t.Fatalf("failed to create scion-agent.yaml: %v", err)
+	}
+
+	builder := NewManifestBuilder(dir)
+	manifest, err := builder.Build()
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	// Should include both files
+	if len(manifest.Files) != 2 {
+		t.Errorf("expected 2 files, got %d", len(manifest.Files))
+	}
+
+	// Verify home/.tmux.conf is in the manifest with the correct relative path
+	found := false
+	for _, f := range manifest.Files {
+		if f.Path == "home/.tmux.conf" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		paths := make([]string, len(manifest.Files))
+		for i, f := range manifest.Files {
+			paths[i] = f.Path
+		}
+		t.Errorf("expected manifest to include home/.tmux.conf, got: %v", paths)
+	}
+}
+
 func TestBuildManifest_Empty(t *testing.T) {
 	manifest := BuildManifest([]FileInfo{})
 

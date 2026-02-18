@@ -18,6 +18,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -268,42 +269,59 @@ func GetEnclosingGrovePath() (grovePath string, rootDir string, found bool) {
 }
 
 // SeedAgnosticTemplate seeds the default agnostic template from embedded files.
-// It copies scion-agent.yaml, agents.md, and system-prompt.md into the target directory.
+// It recursively copies all files and directories (including home/.tmux.conf,
+// home/.zshrc, etc.) into the target directory.
 func SeedAgnosticTemplate(targetDir string, force bool) error {
 	templateBase := "embeds/templates/default"
-
-	entries, err := EmbedsFS.ReadDir(templateBase)
-	if err != nil {
-		return fmt.Errorf("failed to read embedded template directory: %w", err)
-	}
 
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return fmt.Errorf("failed to create template directory %s: %w", targetDir, err)
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		data, err := EmbedsFS.ReadFile(filepath.Join(templateBase, entry.Name()))
+	return fs.WalkDir(EmbedsFS, templateBase, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return fmt.Errorf("failed to read embedded file %s: %w", entry.Name(), err)
+			return err
 		}
 
-		targetPath := filepath.Join(targetDir, entry.Name())
+		// Compute relative path from the template base
+		relPath, err := filepath.Rel(templateBase, path)
+		if err != nil {
+			return fmt.Errorf("failed to compute relative path for %s: %w", path, err)
+		}
+
+		// Skip the root directory itself
+		if relPath == "." {
+			return nil
+		}
+
+		targetPath := filepath.Join(targetDir, relPath)
+
+		if d.IsDir() {
+			if err := os.MkdirAll(targetPath, 0755); err != nil {
+				return fmt.Errorf("failed to create directory %s: %w", targetPath, err)
+			}
+			return nil
+		}
+
+		// Read embedded file
+		data, err := EmbedsFS.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read embedded file %s: %w", relPath, err)
+		}
+
+		// Skip if file exists and force is false
 		if !force {
 			if _, err := os.Stat(targetPath); err == nil {
-				continue // File exists and force is false, skip
+				return nil
 			}
 		}
 
 		if err := os.WriteFile(targetPath, data, 0644); err != nil {
 			return fmt.Errorf("failed to write file %s: %w", targetPath, err)
 		}
-	}
 
-	return nil
+		return nil
+	})
 }
 
 func InitProject(targetDir string, harnesses []api.Harness) error {
