@@ -184,6 +184,101 @@ Each harness emits events in its native format. Sciontool's dialect parsers tran
 └──────────────────────────────────────────────────────────┘
 ```
 
+### 3.4 Harness Telemetry Injection
+
+When `telemetry.enabled` is `true` in the scion configuration, each harness implementation injects configuration into the agent container to direct the harness's native telemetry to the sciontool OTLP collector. These settings are **hardcoded in the harness-specific implementation code** (`pkg/harness/`) and are distinct from sciontool's own forwarding configuration (Section 4/10), which controls how sciontool exports processed telemetry to the cloud.
+
+**Key distinction:**
+- **Harness config** (this section): Tells the agent process where to *emit* its native telemetry → sciontool collector at `localhost`
+- **Sciontool config** (Section 10): Tells sciontool where to *forward* processed telemetry → cloud backend
+
+The sciontool OTLP collector listens on:
+- **gRPC**: `localhost:4317`
+- **HTTP**: `localhost:4318`
+
+There is no namespace collision between harness telemetry variables and sciontool's own configuration. Sciontool uses the `SCION_*` prefix (e.g., `SCION_OTEL_ENDPOINT`), while harnesses use their own namespaces (`GEMINI_TELEMETRY_*`, standard `OTEL_*`, or config files).
+
+#### 3.4.1 Gemini CLI
+
+Gemini CLI supports telemetry configuration via `GEMINI_TELEMETRY_*` environment variables. The harness injects the following:
+
+| Environment Variable | Injected Value | Purpose |
+|---|---|---|
+| `GEMINI_TELEMETRY_ENABLED` | `true` | Enables Gemini's built-in telemetry |
+| `GEMINI_TELEMETRY_TARGET` | `local` | Prevents Gemini from exporting directly to GCP |
+| `GEMINI_TELEMETRY_USE_COLLECTOR` | `true` | Directs output to an external OTLP collector |
+| `GEMINI_TELEMETRY_OTLP_ENDPOINT` | `http://localhost:4317` | Points to sciontool's gRPC receiver |
+| `GEMINI_TELEMETRY_OTLP_PROTOCOL` | `grpc` | Uses gRPC transport |
+| `GEMINI_TELEMETRY_LOG_PROMPTS` | `false` | Respects privacy defaults; prompts not forwarded |
+
+**Notes:**
+- `target=local` is critical — it prevents Gemini from attempting its own direct-to-GCP export, which would bypass sciontool's filtering and aggregation.
+- `useCliAuth` is not set (defaults to `false`) since authentication to the cloud backend is handled by sciontool, not the harness.
+
+#### 3.4.2 Claude Code
+
+Claude Code uses standard OpenTelemetry environment variables for configuration. It supports both metrics and logs/events via OTLP.
+
+| Environment Variable | Injected Value | Purpose |
+|---|---|---|
+| `CLAUDE_CODE_ENABLE_TELEMETRY` | `1` | Enables Claude Code's OTel instrumentation |
+| `OTEL_METRICS_EXPORTER` | `otlp` | Routes metrics via OTLP |
+| `OTEL_LOGS_EXPORTER` | `otlp` | Routes events/logs via OTLP |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | Uses gRPC transport |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Points to sciontool's gRPC receiver |
+| `OTEL_METRIC_EXPORT_INTERVAL` | `30000` | 30-second export interval (default 60s) |
+
+**Not set (privacy defaults):**
+- `OTEL_LOG_USER_PROMPTS` — defaults to disabled; prompt content is redacted (only length recorded).
+- `OTEL_LOG_TOOL_DETAILS` — defaults to disabled; MCP server/tool names not logged.
+- `OTEL_EXPORTER_OTLP_HEADERS` — no auth headers needed for localhost collector.
+
+**Notes:**
+- Claude Code emits both **metrics** (counters like `claude_code.token.usage`, `claude_code.session.count`) and **events** (structured logs like `claude_code.tool_result`, `claude_code.api_request`) as separate OTel signals. Both exporters must be enabled to capture the full telemetry picture.
+- The `OTEL_*` variables are standard OTel SDK variables and do not collide with sciontool's `SCION_OTEL_*` namespace.
+- Claude Code's metrics use `delta` temporality by default (`OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE`), which is the preferred setting for the OTLP pipeline.
+
+#### 3.4.3 Codex (OpenAI)
+
+Codex uses a TOML configuration file (`~/.codex/config.toml`) rather than environment variables. The harness writes this file during container setup.
+
+**Injected configuration:**
+
+```toml
+[otel]
+exporter = { otlp-grpc = {
+  endpoint = "http://localhost:4317"
+}}
+log_user_prompt = false
+```
+
+| Setting | Value | Purpose |
+|---|---|---|
+| `exporter` | `otlp-grpc` | Routes telemetry via gRPC to sciontool |
+| `endpoint` | `http://localhost:4317` | Points to sciontool's gRPC receiver |
+| `log_user_prompt` | `false` | Respects privacy defaults; prompts redacted |
+
+**Notes:**
+- Codex batches events and flushes on shutdown, so there is no configurable export interval.
+- The `environment` field (`dev`/`staging`/`prod`) is not set; it is not required for local collector routing.
+- Codex requires network access for OTel export. If the harness runs Codex with network disabled, the OTel export will silently fail. The harness must ensure localhost loopback is available.
+
+#### 3.4.4 All Other Harnesses
+
+Deferred. Future harnesses will follow the same pattern: inject configuration directing native telemetry to `localhost:4317` (gRPC) or `localhost:4318` (HTTP). Harness implementations should prefer gRPC when supported by the agent.
+
+#### 3.4.5 Data Signal Summary
+
+The following table summarizes what each harness emits natively and how it reaches the sciontool pipeline:
+
+| Harness | Traces/Spans | Metrics | Logs/Events | Config Method |
+|---|---|---|---|---|
+| Gemini CLI | ✓ (OTel native) | ✓ (OTel native) | ✓ (OTel native) | Environment variables |
+| Claude Code | — | ✓ (OTel native) | ✓ (OTel native) | Environment variables |
+| Codex | — | — | ✓ (OTel logs) | TOML config file |
+
+For harnesses that do not emit certain signal types natively (e.g., Claude Code does not emit traces), sciontool's hook-based normalization (Section 3.3) and the TelemetryHandler (Milestone 2) fill the gap by converting hook events into OTLP spans.
+
 ---
 
 ## 4. Data Destinations
