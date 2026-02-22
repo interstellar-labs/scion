@@ -1169,7 +1169,7 @@ func runBrokerStatus(cmd *cobra.Command, args []string) error {
 		status.Registered = true
 		status.CredentialsPath = credStore.Path()
 	} else {
-		// Check global settings for broker ID
+		// Check global settings for broker ID (may be pre-populated from init or from registration)
 		globalSettings, err := config.LoadSettings(globalDir)
 		if err == nil && globalSettings.Hub != nil && globalSettings.Hub.BrokerID != "" {
 			status.BrokerID = globalSettings.Hub.BrokerID
@@ -1260,9 +1260,11 @@ func runBrokerStatus(cmd *cobra.Command, args []string) error {
 	// Registration status
 	fmt.Println("Hub Registration")
 	fmt.Println("----------------")
+	if status.BrokerID != "" {
+		fmt.Printf("  Broker ID:   %s\n", status.BrokerID)
+	}
 	if status.Registered {
 		fmt.Printf("  Registered:  yes\n")
-		fmt.Printf("  Broker ID:   %s\n", status.BrokerID)
 		if status.BrokerName != "" {
 			fmt.Printf("  Broker Name: %s\n", status.BrokerName)
 		}

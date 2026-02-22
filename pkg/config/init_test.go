@@ -407,6 +407,55 @@ func TestInitMachine_SeedsAll(t *testing.T) {
 	if _, err := os.Stat(agentsDir); os.IsNotExist(err) {
 		t.Error("expected agents directory to exist in global directory")
 	}
+
+	// Verify broker ID was pre-populated in settings
+	settings, err := LoadSettings(globalDir)
+	if err != nil {
+		t.Fatalf("failed to load settings: %v", err)
+	}
+	if settings.Hub == nil || settings.Hub.BrokerID == "" {
+		t.Error("expected broker ID to be pre-populated in global settings")
+	}
+	// Should look like a UUID
+	if settings.Hub != nil && settings.Hub.BrokerID != "" {
+		if !strings.Contains(settings.Hub.BrokerID, "-") || len(settings.Hub.BrokerID) != 36 {
+			t.Errorf("expected UUID format for broker ID, got: %q", settings.Hub.BrokerID)
+		}
+	}
+}
+
+func TestInitMachine_DoesNotOverwriteExistingBrokerID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", origHome)
+
+	// First init to seed settings and broker ID
+	if err := InitMachine(GetMockHarnesses()); err != nil {
+		t.Fatalf("first InitMachine failed: %v", err)
+	}
+
+	globalDir := filepath.Join(tmpDir, GlobalDir)
+	settings, err := LoadSettings(globalDir)
+	if err != nil {
+		t.Fatalf("failed to load settings: %v", err)
+	}
+	originalBrokerID := settings.Hub.BrokerID
+
+	// Second init should not overwrite the broker ID
+	if err := InitMachine(GetMockHarnesses()); err != nil {
+		t.Fatalf("second InitMachine failed: %v", err)
+	}
+
+	settings, err = LoadSettings(globalDir)
+	if err != nil {
+		t.Fatalf("failed to reload settings: %v", err)
+	}
+	if settings.Hub.BrokerID != originalBrokerID {
+		t.Errorf("expected broker ID to be preserved across re-init, got %q (was %q)",
+			settings.Hub.BrokerID, originalBrokerID)
+	}
 }
 
 func TestInitGlobal_IsAliasForInitMachine(t *testing.T) {

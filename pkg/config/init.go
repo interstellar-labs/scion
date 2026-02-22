@@ -423,7 +423,32 @@ func InitMachine(harnesses []api.Harness) error {
 		}
 	}
 
+	// Pre-populate a broker ID so this machine has a stable identity.
+	// This will be overwritten if the user later registers with a Hub.
+	if err := ensureBrokerID(globalDir); err != nil {
+		return fmt.Errorf("failed to pre-populate broker ID: %w", err)
+	}
+
 	return nil
+}
+
+// ensureBrokerID checks whether a broker ID already exists in the global settings
+// and generates one if not. This gives the machine a stable identity before
+// Hub registration.
+func ensureBrokerID(globalDir string) error {
+	settings, err := LoadSettings(globalDir)
+	if err != nil {
+		// If we can't load settings, skip — not critical
+		return nil
+	}
+
+	// Check if broker ID is already set (via legacy or versioned path)
+	if settings.Hub != nil && settings.Hub.BrokerID != "" {
+		return nil
+	}
+
+	brokerID := uuid.New().String()
+	return UpdateSetting(globalDir, "hub.brokerId", brokerID, true)
 }
 
 // InitGlobal is an alias for InitMachine, kept for backward compatibility.
