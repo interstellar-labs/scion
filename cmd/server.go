@@ -296,6 +296,19 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// When --global is set, change to the home directory so the server
+	// operates from the global grove context regardless of where it was launched.
+	if globalMode {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+		if err := os.Chdir(home); err != nil {
+			return fmt.Errorf("failed to change to home directory: %w", err)
+		}
+		log.Printf("Global mode: changed working directory to %s", home)
+	}
+
 	// Warn if running from within a project grove instead of the global (~/.scion) grove.
 	// The server loads templates and settings from the active grove context, so running
 	// inside a project grove may pick up project-specific (possibly legacy) configuration.
