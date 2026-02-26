@@ -915,6 +915,229 @@ func TestEnvGather_SecretInfoRelayType(t *testing.T) {
 	}
 }
 
+// TestNonGatherEnv_MissingEnvVars_Returns422 tests that when GatherEnv is NOT
+// set and the broker reports missing env vars, the Hub returns 422 and cleans up.
+func TestNonGatherEnv_MissingEnvVars_Returns422(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{ID: "grove-nogather-missing", Name: "nogather-missing-grove", Slug: "nogather-missing-grove"}
+	if err := st.CreateGrove(ctx, grove); err != nil {
+		t.Fatal(err)
+	}
+
+	broker := &store.RuntimeBroker{
+		ID: "broker-nogather-missing", Name: "nogather-missing-broker", Slug: "nogather-missing-broker",
+		Endpoint: "http://localhost:9800", Status: store.BrokerStatusOnline,
+	}
+	if err := st.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID: "grove-nogather-missing", BrokerID: "broker-nogather-missing",
+		LocalPath: "/tmp/test-grove",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock broker returns env requirements with missing keys
+	mockClient := &envGatherMockBrokerClient{
+		gatherReturnEnvReqs: &RemoteEnvRequirementsResponse{
+			AgentID:  "will-be-set",
+			Required: []string{"ANTHROPIC_API_KEY", "CUSTOM_SECRET"},
+			HubHas:   []string{},
+			Needs:    []string{"ANTHROPIC_API_KEY", "CUSTOM_SECRET"},
+		},
+	}
+	dispatcher := NewHTTPAgentDispatcherWithClient(st, mockClient, true)
+	srv.SetDispatcher(dispatcher)
+
+	// Create agent WITHOUT GatherEnv (simulating web/API caller)
+	reqBody := map[string]interface{}{
+		"name":     "nogather-missing-agent",
+		"groveId":  "grove-nogather-missing",
+		"template": "claude",
+		// gatherEnv is NOT set — this is the non-CLI path
+	}
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", reqBody)
+
+	// Should get 422 — missing env vars
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var errResp ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatal("failed to decode error response:", err)
+	}
+
+	if errResp.Error.Code != ErrCodeMissingEnvVars {
+		t.Errorf("expected error code %q, got %q", ErrCodeMissingEnvVars, errResp.Error.Code)
+	}
+
+	// Details should include missingKeys
+	missingKeys, ok := errResp.Error.Details["missingKeys"]
+	if !ok {
+		t.Fatal("expected missingKeys in error details")
+	}
+	keys, ok := missingKeys.([]interface{})
+	if !ok {
+		t.Fatalf("expected missingKeys to be a slice, got %T", missingKeys)
+	}
+	if len(keys) != 2 {
+		t.Errorf("expected 2 missing keys, got %d", len(keys))
+	}
+
+	// Agent should have been cleaned up from the store
+	result, err := st.ListAgents(ctx, store.AgentFilter{GroveID: "grove-nogather-missing"}, store.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 0 {
+		t.Errorf("expected agent to be cleaned up, but found %d agents", len(result.Items))
+	}
+}
+
+// TestNonGatherEnv_MissingEnvVars_GroveRoute_Returns422 tests the same scenario
+// via the grove-scoped route /api/v1/groves/{groveId}/agents.
+func TestNonGatherEnv_MissingEnvVars_GroveRoute_Returns422(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{ID: "grove-nogather-route", Name: "nogather-route-grove", Slug: "nogather-route-grove"}
+	if err := st.CreateGrove(ctx, grove); err != nil {
+		t.Fatal(err)
+	}
+
+	broker := &store.RuntimeBroker{
+		ID: "broker-nogather-route", Name: "nogather-route-broker", Slug: "nogather-route-broker",
+		Endpoint: "http://localhost:9800", Status: store.BrokerStatusOnline,
+	}
+	if err := st.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID: "grove-nogather-route", BrokerID: "broker-nogather-route",
+		LocalPath: "/tmp/test-grove",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock broker returns env requirements with missing keys
+	mockClient := &envGatherMockBrokerClient{
+		gatherReturnEnvReqs: &RemoteEnvRequirementsResponse{
+			AgentID:  "will-be-set",
+			Required: []string{"ANTHROPIC_API_KEY"},
+			HubHas:   []string{},
+			Needs:    []string{"ANTHROPIC_API_KEY"},
+		},
+	}
+	dispatcher := NewHTTPAgentDispatcherWithClient(st, mockClient, true)
+	srv.SetDispatcher(dispatcher)
+
+	// Create agent via grove-scoped route WITHOUT GatherEnv
+	reqBody := map[string]interface{}{
+		"name":     "nogather-route-agent",
+		"template": "claude",
+	}
+
+	rec := doRequest(t, srv, http.MethodPost,
+		fmt.Sprintf("/api/v1/groves/%s/agents", grove.ID), reqBody)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var errResp ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatal("failed to decode error response:", err)
+	}
+
+	if errResp.Error.Code != ErrCodeMissingEnvVars {
+		t.Errorf("expected error code %q, got %q", ErrCodeMissingEnvVars, errResp.Error.Code)
+	}
+
+	// Agent should have been cleaned up
+	result, err := st.ListAgents(ctx, store.AgentFilter{GroveID: "grove-nogather-route"}, store.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 0 {
+		t.Errorf("expected agent to be cleaned up, but found %d agents", len(result.Items))
+	}
+}
+
+// TestNonGatherEnv_AllSatisfied_Returns201 tests that when GatherEnv is NOT set
+// and all env vars are satisfied, the agent is created normally with 201.
+func TestNonGatherEnv_AllSatisfied_Returns201(t *testing.T) {
+	srv, st := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{ID: "grove-nogather-ok", Name: "nogather-ok-grove", Slug: "nogather-ok-grove"}
+	if err := st.CreateGrove(ctx, grove); err != nil {
+		t.Fatal(err)
+	}
+
+	broker := &store.RuntimeBroker{
+		ID: "broker-nogather-ok", Name: "nogather-ok-broker", Slug: "nogather-ok-broker",
+		Endpoint: "http://localhost:9800", Status: store.BrokerStatusOnline,
+	}
+	if err := st.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.AddGroveProvider(ctx, &store.GroveProvider{
+		GroveID: "grove-nogather-ok", BrokerID: "broker-nogather-ok",
+		LocalPath: "/tmp/test-grove",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock broker returns nil env requirements (all satisfied)
+	mockClient := &envGatherMockBrokerClient{}
+	dispatcher := NewHTTPAgentDispatcherWithClient(st, mockClient, true)
+	srv.SetDispatcher(dispatcher)
+
+	// Create agent WITHOUT GatherEnv — all env satisfied
+	reqBody := map[string]interface{}{
+		"name":     "nogather-ok-agent",
+		"groveId":  "grove-nogather-ok",
+		"template": "claude",
+	}
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", reqBody)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp CreateAgentResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	if resp.Agent == nil {
+		t.Fatal("expected agent in response")
+	}
+
+	// Agent should exist in the store
+	agent, err := st.GetAgent(ctx, resp.Agent.ID)
+	if err != nil {
+		t.Fatalf("expected agent to exist in store: %v", err)
+	}
+	if agent.Status != store.AgentStatusProvisioning && agent.Status != store.AgentStatusRunning {
+		t.Errorf("expected agent status provisioning or running, got %q", agent.Status)
+	}
+
+	// The dispatcher should have used CreateAgentWithGather (not regular Create)
+	if !mockClient.createWithGatherCalled {
+		t.Error("expected CreateAgentWithGather to be called")
+	}
+}
+
 // TestEnvGather_HubHandler_RetryAfterCancel_GroveRoute tests the same retry
 // scenario via the grove-scoped route /api/v1/groves/{groveId}/agents.
 func TestEnvGather_HubHandler_RetryAfterCancel_GroveRoute(t *testing.T) {

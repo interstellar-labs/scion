@@ -634,13 +634,17 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			} else {
-				if err := dispatcher.DispatchAgentCreate(ctx, agent); err != nil {
-					// Log the error but don't fail the request - agent is created in Hub
+				envReqs, err := dispatcher.DispatchAgentCreateWithGather(ctx, agent)
+				if err != nil {
 					warnings = append(warnings, "Failed to dispatch to runtime broker: "+err.Error())
-					// The agent remains in pending status
+				} else if envReqs != nil && len(envReqs.Needs) > 0 {
+					// Broker reported missing required env vars — fail the dispatch.
+					// Clean up the provisioning agent so it doesn't linger.
+					_ = dispatcher.DispatchAgentDelete(ctx, agent, false, false, false, time.Time{})
+					_ = s.store.DeleteAgent(ctx, agent.ID)
+					MissingEnvVars(w, envReqs.Needs, s.buildEnvGatherResponse(ctx, agent, envReqs))
+					return
 				} else {
-					// agent.Status is already set by applyBrokerResponse in DispatchAgentCreate.
-					// Only fall back to provisioning if the broker didn't report a status.
 					if agent.Status == store.AgentStatusPending {
 						agent.Status = store.AgentStatusProvisioning
 					}
@@ -2542,13 +2546,17 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 					}
 				}
 			} else {
-				if err := dispatcher.DispatchAgentCreate(ctx, agent); err != nil {
-					// Log the error but don't fail the request - agent is created in Hub
+				envReqs, err := dispatcher.DispatchAgentCreateWithGather(ctx, agent)
+				if err != nil {
 					warnings = append(warnings, "Failed to dispatch to runtime broker: "+err.Error())
-					// The agent remains in pending status
+				} else if envReqs != nil && len(envReqs.Needs) > 0 {
+					// Broker reported missing required env vars — fail the dispatch.
+					// Clean up the provisioning agent so it doesn't linger.
+					_ = dispatcher.DispatchAgentDelete(ctx, agent, false, false, false, time.Time{})
+					_ = s.store.DeleteAgent(ctx, agent.ID)
+					MissingEnvVars(w, envReqs.Needs, s.buildEnvGatherResponse(ctx, agent, envReqs))
+					return
 				} else {
-					// agent.Status is already set by applyBrokerResponse in DispatchAgentCreate.
-					// Only fall back to provisioning if the broker didn't report a status.
 					if agent.Status == store.AgentStatusPending {
 						agent.Status = store.AgentStatusProvisioning
 					}

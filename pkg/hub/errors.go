@@ -18,8 +18,10 @@ package hub
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/ptone/scion-agent/pkg/secret"
 	"github.com/ptone/scion-agent/pkg/store"
@@ -54,6 +56,8 @@ const (
 	ErrCodeUnavailable        = "unavailable"
 	ErrCodeNoRuntimeBroker      = "no_runtime_broker"
 	ErrCodeRuntimeBrokerUnavail = "runtime_broker_unavailable"
+
+	ErrCodeMissingEnvVars = "missing_env_vars"
 
 	// Broker authentication error codes
 	ErrCodeInvalidJoinToken = "invalid_join_token"
@@ -216,6 +220,22 @@ func RuntimeBrokerUnavailable(w http.ResponseWriter, brokerID string, availableB
 	}
 	writeError(w, http.StatusServiceUnavailable, ErrCodeRuntimeBrokerUnavail,
 		"Specified runtime broker is unavailable", details)
+}
+
+// MissingEnvVars writes a 422 Unprocessable Entity response when required
+// environment variables cannot be resolved from available sources.
+func MissingEnvVars(w http.ResponseWriter, keys []string, envInfo *EnvGatherResponse) {
+	details := map[string]interface{}{
+		"missingKeys": keys,
+	}
+	if envInfo != nil {
+		details["envGather"] = envInfo
+	}
+	writeError(w, http.StatusUnprocessableEntity, ErrCodeMissingEnvVars,
+		fmt.Sprintf("Cannot start agent: %d required environment variable(s) are missing: %s. "+
+			"Set them via 'scion hub secret set' or 'scion hub env set' before creating the agent.",
+			len(keys), strings.Join(keys, ", ")),
+		details)
 }
 
 // RuntimeBrokerSummary is a minimal representation of a runtime broker for error responses.
