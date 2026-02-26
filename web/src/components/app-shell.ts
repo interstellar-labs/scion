@@ -66,7 +66,7 @@ export class ScionApp extends LitElement {
   static override styles = css`
     :host {
       display: flex;
-      min-height: 100vh;
+      height: 100vh;
       background: var(--scion-bg, #f8fafc);
     }
 
@@ -121,6 +121,8 @@ export class ScionApp extends LitElement {
       flex: 1;
       padding: 1.5rem;
       overflow: auto;
+      display: flex;
+      flex-direction: column;
     }
 
     @media (max-width: 640px) {
@@ -134,6 +136,9 @@ export class ScionApp extends LitElement {
       max-width: var(--scion-content-max-width, 1400px);
       margin: 0 auto;
       width: 100%;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
     }
 
     /* Loading overlay */
