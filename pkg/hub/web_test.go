@@ -1365,3 +1365,253 @@ func TestAuthProviders_WithProviders(t *testing.T) {
 	assert.True(t, result["google"])
 	assert.False(t, result["github"])
 }
+
+// --- SSR Prefetch Tests ---
+
+func TestSafeJSONForHTML(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "no special chars",
+			input:    `{"key":"value"}`,
+			expected: `{"key":"value"}`,
+		},
+		{
+			name:     "script close tag",
+			input:    `{"html":"</script>"}`,
+			expected: `{"html":"<\/script>"}`,
+		},
+		{
+			name:     "html comment",
+			input:    `{"html":"<!-- comment -->"}`,
+			expected: `{"html":"<\!-- comment -->"}`,
+		},
+		{
+			name:     "multiple occurrences",
+			input:    `</script></style><!--x-->`,
+			expected: `<\/script><\/style><\!--x-->`,
+		},
+		{
+			name:     "no false positives",
+			input:    `{"path":"/api/v1/agents","count":42}`,
+			expected: `{"path":"/api/v1/agents","count":42}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := safeJSONForHTML(tt.input)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestResolveAPIPath(t *testing.T) {
+	tests := []struct {
+		urlPath  string
+		expected string
+	}{
+		{"/agents", "/api/v1/agents"},
+		{"/agents/", "/api/v1/agents"},
+		{"/groves", "/api/v1/groves"},
+		{"/groves/", "/api/v1/groves"},
+		{"/agents/abc123", "/api/v1/agents/abc123"},
+		{"/groves/my-grove", "/api/v1/groves/my-grove"},
+		{"/", ""},
+		{"/login", ""},
+		{"/settings", ""},
+		{"/admin/users", ""},
+		{"/agents/abc/terminal", ""},  // too many segments
+		{"/groves/abc/settings", ""},  // too many segments
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.urlPath, func(t *testing.T) {
+			got := resolveAPIPath(tt.urlPath)
+			assert.Equal(t, tt.expected, got, "resolveAPIPath(%q)", tt.urlPath)
+		})
+	}
+}
+
+func TestSPAShellHandler_ContainsInitialData(t *testing.T) {
+	ws := newDevAuthWebServer(t)
+
+	// Set up user token service so dev-auth generates Hub JWTs
+	tokenSvc, err := NewUserTokenService(UserTokenConfig{})
+	require.NoError(t, err)
+	ws.SetUserTokenService(tokenSvc)
+
+	// Mount a mock Hub handler that returns agent data with _capabilities
+	mockHub := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"agents": []map[string]interface{}{
+				{
+					"id":     "agent-1",
+					"name":   "test-agent",
+					"status": "running",
+					"_capabilities": map[string]interface{}{
+						"actions": []string{"start", "stop", "delete"},
+					},
+				},
+			},
+			"_capabilities": map[string]interface{}{
+				"actions": []string{"create", "list"},
+			},
+		})
+	})
+	ws.MountHubAPI(mockHub, func(ctx context.Context) error { return nil })
+
+	handler := ws.Handler()
+
+	// Request the agents page
+	req := httptest.NewRequest("GET", "/agents", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	resp := rec.Result()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	html := string(body)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// The __SCION_DATA__ should contain agent data
+	assert.Contains(t, html, `"agent-1"`)
+	assert.Contains(t, html, `"test-agent"`)
+	assert.Contains(t, html, `"_capabilities"`)
+	assert.Contains(t, html, `"actions"`)
+
+	// Verify it's valid JSON by extracting and parsing
+	dataStart := strings.Index(html, `type="application/json">`) + len(`type="application/json">`)
+	dataEnd := strings.Index(html[dataStart:], `</script>`)
+	require.True(t, dataStart > 0 && dataEnd > 0, "should find __SCION_DATA__ boundaries")
+
+	jsonData := html[dataStart : dataStart+dataEnd]
+	var pageData map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(jsonData), &pageData), "initial data should be valid JSON")
+
+	assert.Equal(t, "/agents", pageData["path"])
+	assert.NotNil(t, pageData["data"], "data field should be present")
+	assert.NotNil(t, pageData["user"], "user field should be present")
+}
+
+func TestSPAShellHandler_UserInInitialData(t *testing.T) {
+	ws := newDevAuthWebServer(t)
+	handler := ws.Handler()
+
+	// Request the home page (no API prefetch for /)
+	req := httptest.NewRequest("GET", "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	resp := rec.Result()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	html := string(body)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Extract and parse __SCION_DATA__
+	dataStart := strings.Index(html, `type="application/json">`) + len(`type="application/json">`)
+	dataEnd := strings.Index(html[dataStart:], `</script>`)
+	require.True(t, dataStart > 0 && dataEnd > 0)
+
+	jsonData := html[dataStart : dataStart+dataEnd]
+	var pageData map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(jsonData), &pageData))
+
+	// User info should be present even without API prefetch
+	userObj, ok := pageData["user"].(map[string]interface{})
+	require.True(t, ok, "user should be a JSON object")
+	assert.Equal(t, "dev-user", userObj["id"])
+	assert.Equal(t, "dev@localhost", userObj["email"])
+	assert.Equal(t, "Development User", userObj["name"])
+	assert.Equal(t, "admin", userObj["role"])
+
+	// No API data for the home page
+	assert.Nil(t, pageData["data"])
+}
+
+func TestSPAShellHandler_NoHubMounted(t *testing.T) {
+	ws := newDevAuthWebServer(t)
+	// Do NOT mount a Hub handler
+	handler := ws.Handler()
+
+	// Request the agents page — should still render with user info
+	req := httptest.NewRequest("GET", "/agents", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	resp := rec.Result()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	html := string(body)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Extract and parse __SCION_DATA__
+	dataStart := strings.Index(html, `type="application/json">`) + len(`type="application/json">`)
+	dataEnd := strings.Index(html[dataStart:], `</script>`)
+	require.True(t, dataStart > 0 && dataEnd > 0)
+
+	jsonData := html[dataStart : dataStart+dataEnd]
+	var pageData map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(jsonData), &pageData))
+
+	// User should be present (dev-auth)
+	assert.NotNil(t, pageData["user"])
+
+	// No API data since Hub is not mounted
+	assert.Nil(t, pageData["data"])
+}
+
+func TestSPAShellHandler_HubAPIError(t *testing.T) {
+	ws := newDevAuthWebServer(t)
+
+	// Set up user token service so dev-auth generates Hub JWTs
+	tokenSvc, err := NewUserTokenService(UserTokenConfig{})
+	require.NoError(t, err)
+	ws.SetUserTokenService(tokenSvc)
+
+	// Mount a Hub handler that returns 500
+	mockHub := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "database down"})
+	})
+	ws.MountHubAPI(mockHub, func(ctx context.Context) error { return nil })
+
+	handler := ws.Handler()
+
+	// Request agents page
+	req := httptest.NewRequest("GET", "/agents", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	resp := rec.Result()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	html := string(body)
+
+	// Page should still render (200 OK)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Extract and parse __SCION_DATA__
+	dataStart := strings.Index(html, `type="application/json">`) + len(`type="application/json">`)
+	dataEnd := strings.Index(html[dataStart:], `</script>`)
+	require.True(t, dataStart > 0 && dataEnd > 0)
+
+	jsonData := html[dataStart : dataStart+dataEnd]
+	var pageData map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(jsonData), &pageData))
+
+	// User should still be present (graceful fallback)
+	assert.NotNil(t, pageData["user"])
+
+	// No API data because the Hub returned an error
+	assert.Nil(t, pageData["data"])
+}

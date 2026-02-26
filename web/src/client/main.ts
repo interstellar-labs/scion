@@ -153,12 +153,12 @@ async function init(): Promise<void> {
       currentUser = initialData.user;
     }
     if (initialData.data) {
-      stateManager.hydrate(
-        initialData.data as {
-          agents?: import('../shared/types.js').Agent[];
-          groves?: import('../shared/types.js').Grove[];
-        }
-      );
+      const pageDataObj = initialData.data as {
+        agents?: import('../shared/types.js').Agent[];
+        groves?: import('../shared/types.js').Grove[];
+        _capabilities?: import('../shared/types.js').Capabilities;
+      };
+      stateManager.hydrate(pageDataObj, pageDataObj._capabilities);
     }
   }
 

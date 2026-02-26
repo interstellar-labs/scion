@@ -242,7 +242,16 @@ export class ScionPageAgents extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
-    void this.loadAgents();
+
+    // Use hydrated data from SSR if available, avoiding the initial fetch.
+    const hydratedAgents = stateManager.getAgents();
+    if (hydratedAgents.length > 0) {
+      this.agents = hydratedAgents;
+      this.scopeCapabilities = stateManager.getScopeCapabilities();
+      this.loading = false;
+    } else {
+      void this.loadAgents();
+    }
 
     // Set SSE scope to dashboard (all grove summaries)
     stateManager.setScope({ type: 'dashboard' });
@@ -262,7 +271,13 @@ export class ScionPageAgents extends LitElement {
       // Merge SSE agent deltas into local agent list
       const agentMap = new Map(this.agents.map((a) => [a.id, a]));
       for (const agent of updatedAgents) {
-        agentMap.set(agent.id, { ...agentMap.get(agent.id), ...agent } as Agent);
+        const existing = agentMap.get(agent.id);
+        const merged = { ...existing, ...agent } as Agent;
+        // Preserve _capabilities from existing state when the delta lacks them.
+        if (!agent._capabilities && existing?._capabilities) {
+          merged._capabilities = existing._capabilities;
+        }
+        agentMap.set(agent.id, merged);
       }
       this.agents = Array.from(agentMap.values());
     }

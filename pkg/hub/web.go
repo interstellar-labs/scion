@@ -24,6 +24,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,6 +152,16 @@ type WebServer struct {
 	brokerHealthProvider HealthProvider
 }
 
+// safeJSONForHTML escapes sequences in serialized JSON that could be
+// interpreted as HTML when embedded in a <script> tag. Specifically:
+//   - "</  -> "<\/" prevents closing a parent <script> element.
+//   - "<!--" -> "<\!--" prevents opening an HTML comment.
+func safeJSONForHTML(raw string) string {
+	s := strings.ReplaceAll(raw, "</", `<\/`)
+	s = strings.ReplaceAll(s, "<!--", `<\!--`)
+	return s
+}
+
 // spaShellTemplate is the Go html/template for the SPA shell page.
 // It mirrors the structure from web/src/server/ssr/templates.ts but renders
 // a client-only shell (no SSR content).
@@ -176,7 +187,7 @@ var spaShellTemplate = `<!DOCTYPE html>
     <script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@{{.ShoelaceVersion}}/cdn/shoelace-autoloader.js"></script>
 
     <!-- Initial state for hydration -->
-    <script id="__SCION_DATA__" type="application/json">{}</script>
+    <script id="__SCION_DATA__" type="application/json">{{.InitialData}}</script>
 
     <style>
         /* Critical CSS - Core layout to prevent FOUC */
@@ -316,6 +327,9 @@ var spaShellTemplate = `<!DOCTYPE html>
 type spaShellData struct {
 	ShoelaceVersion string
 	IsLoginPage     bool
+	// InitialData is safe-for-HTML JSON embedded in the __SCION_DATA__ script tag.
+	// It is typed as template.JS so html/template does not escape it further.
+	InitialData template.JS
 }
 
 // NewWebServer creates a new web frontend server.
@@ -631,6 +645,104 @@ func isHashedAsset(path string) bool {
 	return true
 }
 
+// resolveAPIPath maps a browser URL path to the Hub API endpoint that should
+// be prefetched for SSR hydration. Returns "" for paths with no prefetch.
+func resolveAPIPath(urlPath string) string {
+	// Trim trailing slash for consistent matching
+	p := strings.TrimRight(urlPath, "/")
+
+	switch {
+	case p == "/agents":
+		return "/api/v1/agents"
+	case p == "/groves":
+		return "/api/v1/groves"
+	case strings.HasPrefix(p, "/agents/") && strings.Count(p, "/") == 2:
+		// /agents/{id} -> /api/v1/agents/{id}
+		return "/api/v1" + p
+	case strings.HasPrefix(p, "/groves/") && strings.Count(p, "/") == 2:
+		// /groves/{id} -> /api/v1/groves/{id}
+		return "/api/v1" + p
+	default:
+		return ""
+	}
+}
+
+// prefetchPageData builds the initial page data JSON for the __SCION_DATA__
+// script tag. It always includes user info from the session, and optionally
+// prefetches page data from the Hub API via an in-process call.
+func (ws *WebServer) prefetchPageData(r *http.Request) template.JS {
+	// Build user info from session context (set by auth middleware).
+	type pageUser struct {
+		ID        string `json:"id"`
+		Email     string `json:"email"`
+		Name      string `json:"name"`
+		AvatarURL string `json:"avatarUrl,omitempty"`
+		Role      string `json:"role,omitempty"`
+	}
+
+	type pageDataEnvelope struct {
+		Path  string      `json:"path"`
+		Title string      `json:"title"`
+		User  *pageUser   `json:"user,omitempty"`
+		Data  interface{} `json:"data,omitempty"`
+	}
+
+	envelope := pageDataEnvelope{
+		Path:  r.URL.Path,
+		Title: "Scion",
+	}
+
+	// Populate user from session context.
+	if u := getWebSessionUser(r.Context()); u != nil {
+		envelope.User = &pageUser{
+			ID:        u.UserID,
+			Email:     u.Email,
+			Name:      u.Name,
+			AvatarURL: u.AvatarURL,
+			Role:      u.Role,
+		}
+	}
+
+	// Prefetch API data if Hub is mounted and the route maps to an API path.
+	apiPath := resolveAPIPath(r.URL.Path)
+	if apiPath != "" && ws.hubHandler != nil {
+		// Read access token from session for the synthetic request.
+		var accessToken string
+		session, err := ws.sessionStore.Get(r, webSessionName)
+		if err == nil {
+			accessToken, _ = session.Values[sessKeyHubAccessToken].(string)
+		}
+
+		// Create a synthetic request with a 2-second deadline.
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		apiReq, err := http.NewRequestWithContext(ctx, "GET", apiPath, nil)
+		if err == nil {
+			if accessToken != "" {
+				apiReq.Header.Set("Authorization", "Bearer "+accessToken)
+			}
+			rec := httptest.NewRecorder()
+			ws.hubHandler.ServeHTTP(rec, apiReq)
+
+			if rec.Code == http.StatusOK {
+				var apiData interface{}
+				if err := json.Unmarshal(rec.Body.Bytes(), &apiData); err == nil {
+					envelope.Data = apiData
+				}
+			}
+		}
+	}
+
+	raw, err := json.Marshal(envelope)
+	if err != nil {
+		slog.Error("Failed to marshal SSR page data", "error", err)
+		return template.JS("{}")
+	}
+
+	return template.JS(safeJSONForHTML(string(raw)))
+}
+
 // spaHandler returns the SPA shell HTML for any route not matched by other handlers.
 func (ws *WebServer) spaHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -646,6 +758,7 @@ func (ws *WebServer) spaHandler() http.HandlerFunc {
 		data := spaShellData{
 			ShoelaceVersion: shoelaceVersion,
 			IsLoginPage:     r.URL.Path == "/login",
+			InitialData:     ws.prefetchPageData(r),
 		}
 		if err := ws.shellTmpl.Execute(w, data); err != nil {
 			slog.Error("Failed to render SPA shell", "error", err)

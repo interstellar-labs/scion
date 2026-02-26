@@ -44,6 +44,8 @@ export interface AppState {
   deletedGroveIds: Set<string>;
   connected: boolean;
   scope: ViewScope | null;
+  /** Scope-level capabilities from the SSR-prefetched list response */
+  scopeCapabilities: import('../shared/types.js').Capabilities | undefined;
 }
 
 /** Events dispatched by StateManager */
@@ -63,6 +65,7 @@ export class StateManager extends EventTarget {
     deletedGroveIds: new Set(),
     connected: false,
     scope: null,
+    scopeCapabilities: undefined,
   };
 
   private sseClient = new SSEClient();
@@ -89,8 +92,15 @@ export class StateManager extends EventTarget {
   /**
    * Initialize state from server-rendered data.
    * Called once on page load with the __SCION_DATA__ payload.
+   *
+   * @param initialData - Agents and/or groves from the prefetched API response.
+   * @param scopeCapabilities - Scope-level capabilities from the API response's
+   *   top-level `_capabilities` field (if present).
    */
-  hydrate(initialData: { agents?: Agent[]; groves?: Grove[] }): void {
+  hydrate(
+    initialData: { agents?: Agent[]; groves?: Grove[] },
+    scopeCapabilities?: import('../shared/types.js').Capabilities,
+  ): void {
     if (initialData.agents) {
       for (const agent of initialData.agents) {
         this.state.agents.set(agent.id, agent);
@@ -101,6 +111,10 @@ export class StateManager extends EventTarget {
       for (const grove of initialData.groves) {
         this.state.groves.set(grove.id, grove);
       }
+    }
+
+    if (scopeCapabilities) {
+      this.state.scopeCapabilities = scopeCapabilities;
     }
   }
 
@@ -122,6 +136,7 @@ export class StateManager extends EventTarget {
     this.state.groves.clear();
     this.state.brokers.clear();
     this.state.deletedGroveIds.clear();
+    this.state.scopeCapabilities = undefined;
 
     const subjects = this.subjectsForScope(scope);
     if (subjects.length > 0) {
@@ -227,6 +242,11 @@ export class StateManager extends EventTarget {
       const delta = data as Partial<Agent>;
       // Ensure id is always set
       const updated = { ...existing, ...delta, id: agentId };
+      // Preserve _capabilities from existing state when the delta doesn't
+      // provide valid capabilities (SSE status deltas typically omit them).
+      if (!delta._capabilities && existing._capabilities) {
+        updated._capabilities = existing._capabilities;
+      }
       this.state.agents.set(agentId, updated as Agent);
     }
     this.notify('agents-updated');
@@ -242,6 +262,9 @@ export class StateManager extends EventTarget {
       const id = summaryData.groveId || groveId;
       const existing = this.state.groves.get(id) || ({} as Grove);
       const updated = { ...existing, ...summaryData, id };
+      if (!summaryData._capabilities && existing._capabilities) {
+        updated._capabilities = existing._capabilities;
+      }
       this.state.groves.set(id, updated as Grove);
     } else {
       // Grove lifecycle events: created, updated
@@ -249,6 +272,9 @@ export class StateManager extends EventTarget {
       const id = groveData.groveId || groveId;
       const existing = this.state.groves.get(id) || ({} as Grove);
       const updated = { ...existing, ...groveData, id };
+      if (!groveData._capabilities && existing._capabilities) {
+        updated._capabilities = existing._capabilities;
+      }
       this.state.groves.set(id, updated as Grove);
     }
     this.notify('groves-updated');
@@ -309,6 +335,10 @@ export class StateManager extends EventTarget {
 
   getDeletedGroveIds(): Set<string> {
     return this.state.deletedGroveIds;
+  }
+
+  getScopeCapabilities(): import('../shared/types.js').Capabilities | undefined {
+    return this.state.scopeCapabilities;
   }
 
   get isConnected(): boolean {

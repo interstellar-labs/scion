@@ -241,7 +241,16 @@ export class ScionPageGroves extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
-    void this.loadGroves();
+
+    // Use hydrated data from SSR if available, avoiding the initial fetch.
+    const hydratedGroves = stateManager.getGroves();
+    if (hydratedGroves.length > 0) {
+      this.groves = hydratedGroves;
+      this.scopeCapabilities = stateManager.getScopeCapabilities();
+      this.loading = false;
+    } else {
+      void this.loadGroves();
+    }
 
     // Set SSE scope to dashboard (grove summaries)
     stateManager.setScope({ type: 'dashboard' });
@@ -268,7 +277,13 @@ export class ScionPageGroves extends LitElement {
 
     // Merge updated/created groves
     for (const grove of updatedGroves) {
-      groveMap.set(grove.id, { ...groveMap.get(grove.id), ...grove } as Grove);
+      const existing = groveMap.get(grove.id);
+      const merged = { ...existing, ...grove } as Grove;
+      // Preserve _capabilities from existing state when the delta lacks them.
+      if (!grove._capabilities && existing?._capabilities) {
+        merged._capabilities = existing._capabilities;
+      }
+      groveMap.set(grove.id, merged);
     }
 
     this.groves = Array.from(groveMap.values());
