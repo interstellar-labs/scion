@@ -31,6 +31,7 @@ import { isTerminalAvailable } from '../../shared/types.js';
 // These will be imported dynamically in firstUpdated() since they require DOM APIs
 type Terminal = import('@xterm/xterm').Terminal;
 type FitAddon = import('@xterm/addon-fit').FitAddon;
+type ClipboardAddon = import('@xterm/addon-clipboard').ClipboardAddon;
 
 /** PTY WebSocket message types */
 interface PTYDataMessage {
@@ -68,6 +69,7 @@ export class ScionPageTerminal extends LitElement {
 
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
+  private clipboardAddon: ClipboardAddon | null = null;
   private socket: WebSocket | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private resizeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -282,10 +284,11 @@ export class ScionPageTerminal extends LitElement {
 
   private async initTerminal(): Promise<void> {
     // Dynamic import — xterm.js requires DOM APIs not available during SSR
-    const [{ Terminal }, { FitAddon }, { WebLinksAddon }] = await Promise.all([
+    const [{ Terminal }, { FitAddon }, { WebLinksAddon }, { ClipboardAddon }] = await Promise.all([
       import('@xterm/xterm'),
       import('@xterm/addon-fit'),
       import('@xterm/addon-web-links'),
+      import('@xterm/addon-clipboard'),
     ]);
 
     const container = this.shadowRoot?.querySelector('.terminal-container') as HTMLElement;
@@ -326,6 +329,10 @@ export class ScionPageTerminal extends LitElement {
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.loadAddon(new WebLinksAddon());
 
+    // ClipboardAddon handles OSC 52 sequences from tmux for clipboard relay
+    this.clipboardAddon = new ClipboardAddon();
+    this.terminal.loadAddon(this.clipboardAddon);
+
     // Inject xterm.css into shadow root
     const xtermStyle = document.createElement('style');
     // We need to fetch and inject xterm CSS since it can't penetrate shadow DOM
@@ -344,6 +351,46 @@ export class ScionPageTerminal extends LitElement {
     // has its final dimensions (below the toolbar).
     await new Promise((resolve) => requestAnimationFrame(resolve));
     this.fitAddon.fit();
+
+    // Clipboard key bindings — xterm.js inside Shadow DOM needs explicit handling
+    this.terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+      const isMod = event.ctrlKey || event.metaKey;
+
+      // Ctrl/Cmd+C: copy selection if present, otherwise send SIGINT
+      if (event.type === 'keydown' && event.key === 'c' && isMod && !event.shiftKey) {
+        if (this.terminal?.hasSelection()) {
+          void navigator.clipboard.writeText(this.terminal.getSelection());
+          return false; // prevent sending to PTY
+        }
+        return true; // no selection → send SIGINT
+      }
+
+      // Ctrl/Cmd+V: paste from clipboard
+      if (event.type === 'keydown' && event.key === 'v' && isMod && !event.shiftKey) {
+        void navigator.clipboard.readText().then((text) => {
+          if (text) this.sendData(text);
+        });
+        return false;
+      }
+
+      // Ctrl+Shift+C: always copy
+      if (event.type === 'keydown' && event.key === 'C' && event.ctrlKey && event.shiftKey) {
+        if (this.terminal?.hasSelection()) {
+          void navigator.clipboard.writeText(this.terminal.getSelection());
+        }
+        return false;
+      }
+
+      // Ctrl+Shift+V: always paste
+      if (event.type === 'keydown' && event.key === 'V' && event.ctrlKey && event.shiftKey) {
+        void navigator.clipboard.readText().then((text) => {
+          if (text) this.sendData(text);
+        });
+        return false;
+      }
+
+      return true;
+    });
 
     // Handle terminal input
     this.terminal.onData((data: string) => {
@@ -471,6 +518,7 @@ export class ScionPageTerminal extends LitElement {
       this.resizeTimer = null;
     }
     this.fitAddon = null;
+    this.clipboardAddon = null;
   }
 
   private handleBackToAgent(e: Event): void {
