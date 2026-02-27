@@ -34,7 +34,8 @@ export type ViewScope =
   | { type: 'dashboard' }
   | { type: 'grove'; groveId: string }
   | { type: 'agent-detail'; groveId: string; agentId: string }
-  | { type: 'brokers-list' };
+  | { type: 'brokers-list' }
+  | { type: 'broker-detail'; brokerId: string };
 
 /** Full in-memory state for the current scope */
 export interface AppState {
@@ -168,6 +169,10 @@ export class StateManager extends EventTarget {
       case 'brokers-list':
         // All broker-scoped events: status changes
         return ['broker.>'];
+
+      case 'broker-detail':
+        // Broker-specific events
+        return ['broker.>'];
     }
   }
 
@@ -175,6 +180,7 @@ export class StateManager extends EventTarget {
     if (a.type !== b.type) return false;
     if (a.type === 'dashboard' && b.type === 'dashboard') return true;
     if (a.type === 'brokers-list' && b.type === 'brokers-list') return true;
+    if (a.type === 'broker-detail' && b.type === 'broker-detail') return a.brokerId === b.brokerId;
     if (a.type === 'grove' && b.type === 'grove') return a.groveId === b.groveId;
     if (a.type === 'agent-detail' && b.type === 'agent-detail') {
       return a.groveId === b.groveId && a.agentId === b.agentId;

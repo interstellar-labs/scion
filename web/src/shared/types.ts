@@ -288,6 +288,7 @@ export interface RuntimeBroker {
   profiles?: BrokerProfile[];
   autoProvide: boolean;
   endpoint?: string;
+  createdBy?: string;
   createdAt: string;
   updatedAt: string;
 }

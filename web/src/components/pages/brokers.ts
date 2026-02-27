@@ -87,6 +87,10 @@ export class ScionPageBrokers extends LitElement {
       border-radius: var(--scion-radius-lg, 0.75rem);
       padding: 1.5rem;
       transition: all var(--scion-transition-fast, 150ms ease);
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+      display: block;
     }
 
     .broker-card:hover {
@@ -413,7 +417,7 @@ export class ScionPageBrokers extends LitElement {
 
   private renderBrokerCard(broker: RuntimeBroker) {
     return html`
-      <div class="broker-card">
+      <a href="/brokers/${broker.id}" class="broker-card">
         <div class="broker-header">
           <div>
             <h3 class="broker-name">
@@ -443,8 +447,16 @@ export class ScionPageBrokers extends LitElement {
                 </div>
               `
             : ''}
+          ${broker.createdBy
+            ? html`
+                <div class="stat">
+                  <span class="stat-label">Created By</span>
+                  <span class="stat-value">${broker.createdBy}</span>
+                </div>
+              `
+            : ''}
         </div>
-      </div>
+      </a>
     `;
   }
 
