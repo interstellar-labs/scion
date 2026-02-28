@@ -78,6 +78,14 @@ export default defineConfig({
                 entryFileNames: 'assets/[name].js',
                 chunkFileNames: 'assets/[name]-[hash].js',
                 assetFileNames: 'assets/[name]-[hash].[ext]',
+                manualChunks(id) {
+                    if (id.includes('node_modules/@shoelace-style')) {
+                        return 'shoelace';
+                    }
+                    if (id.includes('node_modules/lit') || id.includes('node_modules/@lit')) {
+                        return 'lit';
+                    }
+                },
             },
         },
         sourcemap: true,
