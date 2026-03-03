@@ -176,6 +176,11 @@ func (nd *NotificationDispatcher) storeAndDispatch(ctx context.Context, sub *sto
 	}
 }
 
+// agentNotificationPrefix is prepended to notification messages dispatched to
+// subscriber agents, giving the receiving agent context about why it is
+// receiving the message.
+const agentNotificationPrefix = "You are being notified by the system because an agent you manage has reached a notable state. "
+
 // dispatchToAgent sends a notification message to a subscriber agent.
 func (nd *NotificationDispatcher) dispatchToAgent(ctx context.Context, sub *store.NotificationSubscription, notif *store.Notification) {
 	subscriber, err := nd.store.GetAgentBySlug(ctx, sub.GroveID, sub.SubscriberID)
@@ -205,7 +210,8 @@ func (nd *NotificationDispatcher) dispatchToAgent(ctx context.Context, sub *stor
 		return
 	}
 
-	if err := dispatcher.DispatchAgentMessage(ctx, subscriber, notif.Message, false); err != nil {
+	prefixedMessage := agentNotificationPrefix + notif.Message
+	if err := dispatcher.DispatchAgentMessage(ctx, subscriber, prefixedMessage, false); err != nil {
 		nd.log.Error("Failed to dispatch notification to agent",
 			"subscriberID", sub.SubscriberID, "error", err)
 	}

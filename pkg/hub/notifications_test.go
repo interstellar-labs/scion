@@ -595,7 +595,31 @@ func TestNotificationDispatcher_CompletedWithTaskSummary(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond)
 
 	calls := env.dispatcher.getCalls()
-	assert.Equal(t, "watched-agent has reached a state of COMPLETED: Refactored auth module", calls[0].Message)
+	assert.Equal(t, agentNotificationPrefix+"watched-agent has reached a state of COMPLETED: Refactored auth module", calls[0].Message)
+}
+
+func TestNotificationDispatcher_AgentDispatchIncludesPrefix(t *testing.T) {
+	env := setupNotificationTest(t)
+	env.nd.Start()
+	defer env.nd.Stop()
+
+	env.publishStatus("completed")
+
+	require.Eventually(t, func() bool {
+		return len(env.dispatcher.getCalls()) == 1
+	}, 2*time.Second, 50*time.Millisecond)
+
+	calls := env.dispatcher.getCalls()
+
+	// Dispatched message to agent should include the context prefix
+	assert.True(t, len(calls[0].Message) > len(agentNotificationPrefix))
+	assert.Contains(t, calls[0].Message, agentNotificationPrefix)
+
+	// Stored notification should NOT include the prefix (it is added at dispatch time only)
+	notifs, err := env.store.GetNotifications(context.Background(), store.SubscriberTypeAgent, env.subscriber.Slug, false)
+	require.NoError(t, err)
+	require.Len(t, notifs, 1)
+	assert.NotContains(t, notifs[0].Message, agentNotificationPrefix)
 }
 
 func TestNotificationDispatcher_WaitingForInputWithMessage(t *testing.T) {
@@ -615,5 +639,5 @@ func TestNotificationDispatcher_WaitingForInputWithMessage(t *testing.T) {
 	}, 2*time.Second, 50*time.Millisecond)
 
 	calls := env.dispatcher.getCalls()
-	assert.Equal(t, "watched-agent is WAITING_FOR_INPUT: Please approve the PR", calls[0].Message)
+	assert.Equal(t, agentNotificationPrefix+"watched-agent is WAITING_FOR_INPUT: Please approve the PR", calls[0].Message)
 }
