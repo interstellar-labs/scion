@@ -606,6 +606,11 @@ func (r *KubernetesRuntime) buildPod(namespace string, config RunConfig) *corev1
 		}
 	}
 
+	// Inject GCP telemetry credential path if the well-known secret is present
+	if credPath := findGCPTelemetryCredentialPath(config.ResolvedSecrets, fmt.Sprintf("/home/%s", config.UnixUsername)); credPath != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: telemetryGCPCredentialsEnvVar, Value: credPath})
+	}
+
 	// Pass host user UID/GID for container user synchronization
 	envVars = append(envVars, corev1.EnvVar{Name: "SCION_HOST_UID", Value: fmt.Sprintf("%d", os.Getuid())})
 	envVars = append(envVars, corev1.EnvVar{Name: "SCION_HOST_GID", Value: fmt.Sprintf("%d", os.Getgid())})

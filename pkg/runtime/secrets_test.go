@@ -283,6 +283,53 @@ func TestWriteSecretMap_NoFileSecrets(t *testing.T) {
 	}
 }
 
+func TestFindGCPTelemetryCredentialPath_Present(t *testing.T) {
+	secrets := []api.ResolvedSecret{
+		{Name: "other-secret", Type: "file", Target: "/etc/other", Value: "data"},
+		{Name: "scion-telemetry-gcp-credentials", Type: "file", Target: "/etc/gcp/sa.json", Value: "key-data"},
+	}
+
+	got := findGCPTelemetryCredentialPath(secrets, "/home/scion")
+	want := "/etc/gcp/sa.json"
+	if got != want {
+		t.Errorf("findGCPTelemetryCredentialPath() = %q, want %q", got, want)
+	}
+}
+
+func TestFindGCPTelemetryCredentialPath_Absent(t *testing.T) {
+	secrets := []api.ResolvedSecret{
+		{Name: "other-secret", Type: "file", Target: "/etc/other", Value: "data"},
+	}
+
+	got := findGCPTelemetryCredentialPath(secrets, "/home/scion")
+	if got != "" {
+		t.Errorf("findGCPTelemetryCredentialPath() = %q, want empty string", got)
+	}
+}
+
+func TestFindGCPTelemetryCredentialPath_WrongType(t *testing.T) {
+	secrets := []api.ResolvedSecret{
+		{Name: "scion-telemetry-gcp-credentials", Type: "environment", Target: "GCP_CREDS", Value: "key-data"},
+	}
+
+	got := findGCPTelemetryCredentialPath(secrets, "/home/scion")
+	if got != "" {
+		t.Errorf("findGCPTelemetryCredentialPath() = %q, want empty string for environment type", got)
+	}
+}
+
+func TestFindGCPTelemetryCredentialPath_TildeExpansion(t *testing.T) {
+	secrets := []api.ResolvedSecret{
+		{Name: "scion-telemetry-gcp-credentials", Type: "file", Target: "~/.config/gcp/sa.json", Value: "key-data"},
+	}
+
+	got := findGCPTelemetryCredentialPath(secrets, "/home/gemini")
+	want := "/home/gemini/.config/gcp/sa.json"
+	if got != want {
+		t.Errorf("findGCPTelemetryCredentialPath() = %q, want %q", got, want)
+	}
+}
+
 func TestInsertVolumeFlags(t *testing.T) {
 	tests := []struct {
 		name       string

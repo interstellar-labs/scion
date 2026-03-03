@@ -57,6 +57,11 @@ func (r *AppleContainerRuntime) Run(ctx context.Context, config RunConfig) (stri
 		}
 	}
 
+	// Inject GCP telemetry credential path if the well-known secret is present
+	if credPath := findGCPTelemetryCredentialPath(config.ResolvedSecrets, util.GetHomeDir(config.UnixUsername)); credPath != "" {
+		config.Env = append(config.Env, telemetryGCPCredentialsEnvVar+"="+credPath)
+	}
+
 	args, err := buildCommonRunArgs(config)
 	if err != nil {
 		return "", err

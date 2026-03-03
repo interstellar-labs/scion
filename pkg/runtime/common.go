@@ -29,6 +29,24 @@ import (
 	"github.com/ptone/scion-agent/pkg/util"
 )
 
+// Well-known secret name and env var for GCP telemetry credentials.
+const (
+	telemetryGCPCredentialsSecretName = "scion-telemetry-gcp-credentials"
+	telemetryGCPCredentialsEnvVar     = "SCION_OTEL_GCP_CREDENTIALS"
+)
+
+// findGCPTelemetryCredentialPath scans the resolved secrets for the well-known
+// GCP telemetry credential file secret and returns the expanded container target
+// path. Returns "" if the secret is not present or is not a file type.
+func findGCPTelemetryCredentialPath(secrets []api.ResolvedSecret, containerHome string) string {
+	for _, s := range secrets {
+		if s.Name == telemetryGCPCredentialsSecretName && s.Type == "file" {
+			return expandTildeTarget(s.Target, containerHome)
+		}
+	}
+	return ""
+}
+
 // buildCommonRunArgs constructs the common arguments for 'run' command across different runtimes.
 func buildCommonRunArgs(config RunConfig) ([]string, error) {
 	args := []string{"run", "-d", "-i"}
