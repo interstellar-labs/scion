@@ -49,6 +49,9 @@ export class ScionPageAgentCreate extends LitElement {
   @state()
   private task = '';
 
+  @state()
+  private notify = true;
+
   static override styles = css`
     :host {
       display: block;
@@ -162,6 +165,33 @@ export class ScionPageAgentCreate extends LitElement {
 
     .broker-dot.degraded {
       background: var(--sl-color-warning-500, #f59e0b);
+    }
+
+    .notify-field {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .notify-field sl-checkbox::part(label) {
+      font-size: 0.875rem;
+      color: var(--scion-text, #1e293b);
+    }
+
+    .help-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--scion-text-muted, #64748b);
+      color: var(--scion-surface, #ffffff);
+      font-size: 0.6875rem;
+      font-weight: 700;
+      cursor: help;
+      flex-shrink: 0;
     }
 
     .form-actions {
@@ -301,6 +331,7 @@ export class ScionPageAgentCreate extends LitElement {
         name: this.name.trim(),
         groveId: this.groveId,
         harnessConfig: this.harness,
+        notify: this.notify,
       };
 
       if (this.templateId) {
@@ -516,6 +547,23 @@ export class ScionPageAgentCreate extends LitElement {
               resize="auto"
             ></sl-textarea>
             <div class="hint">The task or prompt to start the agent with.</div>
+          </div>
+
+          <div class="notify-field">
+            <sl-checkbox
+              ?checked=${this.notify}
+              @sl-change=${(e: Event) => {
+                this.notify = (e.target as HTMLInputElement).checked;
+              }}
+            >
+              Notify me on important agent state changes
+            </sl-checkbox>
+            <sl-tooltip
+              content="You will be notified when this agent reaches: Completed, Waiting for Input, or Limits Exceeded."
+              hoist
+            >
+              <span class="help-badge">?</span>
+            </sl-tooltip>
           </div>
 
           <div class="form-actions">
