@@ -1,6 +1,6 @@
 # GCP Authentication for Agent Telemetry Export
 
-**Status:** Draft — Pending Technical Review
+**Status:** Draft — Reviewed
 **Date:** 2026-03-03
 **Parent Document:** [Hosted Scion Metrics System Design](metrics-system.md)
 
@@ -51,7 +51,7 @@ No other roles should be granted. The account must not have `roles/editor`, `rol
 
 ### 3.3 Key Management
 
-A JSON key file is generated for this service account and stored as a Hub-managed secret. Key rotation is handled out-of-band (see §7, Open Questions).
+A JSON key file is generated for this service account and stored as a Hub-managed secret. Key rotation is handled manually by an administrator (see §7.1).
 
 ---
 
@@ -75,17 +75,17 @@ A JSON key file is generated for this service account and stored as a Hub-manage
 
 ### 4.2 Hub: Secret Storage
 
-The telemetry SA key is stored using the existing secrets system ([Secrets Design](secrets.md)) as a **file-type secret** scoped to the grove:
+The telemetry SA key is stored using the existing secrets system ([Secrets Design](secrets.md)) as a **file-type secret** scoped to the hub:
 
 | Field | Value |
 |-------|-------|
 | **Name** | `scion-telemetry-gcp-credentials` |
 | **Type** | `file` |
 | **Target** | `~/.scion/telemetry-gcp-credentials.json` |
-| **Scope** | `grove` (or `runtime_broker` — see §7.3) |
+| **Scope** | `hub` |
 | **Value** | Base64-encoded service account JSON key |
 
-When telemetry is enabled for a grove with the `gcp` cloud backend, the Hub includes this secret in the `ResolvedSecrets` list within the `CreateAgent` dispatch payload sent to the broker.
+Hub-scoped secrets are resolved and included for all groves and brokers served by that hub instance. When telemetry is enabled for a grove with the `gcp` cloud backend, the Hub includes this secret in the `ResolvedSecrets` list within the `CreateAgent` dispatch payload sent to the broker.
 
 ### 4.3 Broker: File Staging
 
@@ -104,7 +104,6 @@ In addition to staging the file, the broker sets a scion-specific environment va
 ```
 SCION_OTEL_GCP_CREDENTIALS=/home/<user>/.scion/telemetry-gcp-credentials.json
 ```
-
 This variable is set alongside the existing telemetry env vars emitted by `TelemetryConfigToEnv()` in `pkg/config/telemetry_convert.go`.
 
 **Why not `GOOGLE_APPLICATION_CREDENTIALS`?**
@@ -201,75 +200,41 @@ telemetry:
     enabled: true
 ```
 
-When `provider: gcp` is set and the `scion-telemetry-gcp-credentials` secret exists for the grove, the full injection chain activates automatically during agent provisioning.
+When `provider: gcp` is set and the `scion-telemetry-gcp-credentials` secret exists at hub scope, the full injection chain activates automatically during agent provisioning.
 
 ---
 
-## 7. Open Questions
+## 7. Design Decisions
 
 ### 7.1 Key Rotation Strategy
 
-**Question:** How should the telemetry SA key be rotated?
-
-**Options:**
-1. **Manual rotation**: Admin generates a new key, updates the Hub secret, and restarts affected agents.
-2. **Automated rotation**: The Hub periodically rotates the key via the GCP IAM API and updates the secret. Running agents would need a mechanism to pick up the new key (restart or signal).
-3. **Short-lived tokens**: Instead of a long-lived key, the Hub could mint short-lived access tokens and inject those. This would require a token-refresh sidecar or periodic re-injection.
-
-**Recommendation:** Start with manual rotation (option 1). Automated rotation can be added as a secrets-system enhancement without changing this design.
+**Decision:** Manual rotation. An administrator generates a new key, updates the Hub secret, and restarts affected agents. Automated rotation can be added as a secrets-system enhancement in the future without changing this design.
 
 ### 7.2 Per-Grove vs. Shared Key
 
-**Question:** Should each grove have its own dedicated SA key, or should a single telemetry SA key be shared across all groves on a Hub?
+**Decision:** A single shared key per Hub instance. The key is scoped at whatever level the secret resolves to (initially `hub` scope). The GCP resource labels attached to telemetry data (grove name, agent name) already provide per-grove attribution. Per-grove keys can be introduced later by changing the secret scope without modifying the injection mechanism.
 
-**Trade-offs:**
-- **Per-grove**: Better audit trail (logs are attributable to a specific grove's key), blast radius limited on key compromise. More keys to manage.
-- **Shared**: Simpler management, fewer keys. Compromise affects all groves.
+### 7.3 Secret Scope
 
-**Recommendation:** Start with a single key per Hub instance. The GCP resource labels attached to telemetry data (grove name, agent name) already provide attribution. Per-grove keys can be introduced later without changing the injection mechanism.
-
-### 7.3 Secret Scope: Grove vs. Runtime Broker
-
-**Question:** Should the telemetry credential secret be scoped to the grove or to the runtime broker?
-
-**Context:**
-- `grove` scope: Every broker serving that grove receives the same key. Simplest model.
-- `runtime_broker` scope: Each broker could have its own key, enabling per-broker revocation. More operational complexity.
-
-**Recommendation:** `grove` scope. The telemetry key is logically a property of the project, not the compute infrastructure.
+**Decision:** `hub` scope. The telemetry credential is initially stored as a hub-scoped secret, making it available to all groves and brokers served by that hub. Hub-scoped secrets are being implemented separately as a general secrets-system feature. The injection mechanism is scope-agnostic — if the secret scope is later narrowed to `grove` or `runtime_broker`, no changes to the injection pipeline are required.
 
 ### 7.4 Workload Identity Federation as Alternative
 
-**Question:** On GKE or Cloud Run, should we prefer Workload Identity Federation (WIF) over injected key files?
-
-**Context:** WIF eliminates the need for key files entirely by binding Kubernetes service accounts to GCP service accounts. However, it only works in GKE/Cloud Run environments, not on self-hosted Docker brokers.
-
-**Recommendation:** Design the key-file injection as the universal baseline. WIF support can be added as a `provider: gcp-wif` variant that skips key injection and relies on ambient credentials. The sciontool fallback-to-ADC behavior (§5.2) already supports this path.
+**Decision:** Key-file injection is the universal baseline. For GKE or Cloud Run environments where Workload Identity Federation (WIF) is available, the sciontool fallback-to-ADC behavior (§5.2) already provides a working path — no key injection is needed when ambient credentials are present. A dedicated `provider: gcp-wif` variant can be added in the future if explicit opt-in is desired.
 
 ### 7.5 Key File Path Convention
 
-**Question:** Is `~/.scion/telemetry-gcp-credentials.json` the right path, or should it live elsewhere?
-
-**Considerations:**
-- It should be outside of `~/.config/gcloud/` to avoid ADC discovery.
-- It should be within the `.scion` namespace for consistency with other scion-managed files.
-- It must not collide with the existing `~/.scion/secrets.json` (variable secrets store).
-
-**Current proposal:** `~/.scion/telemetry-gcp-credentials.json` — clear, namespaced, and unlikely to be discovered by convention-based credential loaders.
+**Decision:** `~/.scion/telemetry-gcp-credentials.json`. This path is outside `~/.config/gcloud/` (avoiding ADC discovery), within the `.scion` namespace for consistency, and does not collide with existing scion-managed files.
 
 ### 7.6 Multiple Cloud Providers
 
-**Question:** If a future deployment needs to export to both GCP and another cloud simultaneously, does this design accommodate that?
+The `SCION_OTEL_GCP_CREDENTIALS` variable is GCP-specific by name and only consumed by the GCP exporter codepath. A second provider (e.g., AWS) would use its own namespaced variable (e.g., `SCION_OTEL_AWS_CREDENTIALS`) and its own injected credential, without conflict.
 
-**Answer:** Yes. The `SCION_OTEL_GCP_CREDENTIALS` variable is GCP-specific by name and only consumed by the GCP exporter codepath. A second provider (e.g., AWS) would use its own namespaced variable (e.g., `SCION_OTEL_AWS_CREDENTIALS`) and its own injected credential, without conflict.
+### 7.7 Credential File Permissions in Apple Runtime — Open
 
-### 7.7 Credential File Permissions in Apple Runtime
+**Status:** Open — requires verification.
 
-**Question:** The Apple Virtualization Framework runtime uses a file-copy mechanism (secret-map.json) rather than bind-mounts. Does the existing `writeSecretMap` path preserve `0600` permissions on the credential file inside the VM?
-
-**Context:** `writeSecretMap` in `pkg/runtime/common.go` writes a manifest that the in-VM agent copies from a shared volume. The copy step would need to enforce restrictive permissions.
-
-**Action needed:** Verify that the Apple runtime's secret-copy logic sets appropriate permissions, or add explicit `chmod 0600` in the copy step.
+The Apple Virtualization Framework runtime uses a file-copy mechanism (`secret-map.json`) rather than bind-mounts. The `writeSecretMap` path in `pkg/runtime/common.go` writes a manifest that the in-VM agent copies from a shared volume. It must be verified that the copy step enforces `0600` permissions on the credential file inside the VM, or an explicit `chmod 0600` should be added.
 
 ---
 
@@ -304,10 +269,11 @@ If an agent process escapes the container, it could read the key file from the h
 ## 9. Implementation Checklist
 
 1. **GCP Setup**: Create `scion-telemetry-writer` service account with roles from §3.2. Generate JSON key.
-2. **Hub Secret**: Store the key as a `file`-type secret named `scion-telemetry-gcp-credentials` at grove scope.
+2. **Hub Secret**: Store the key as a `file`-type secret named `scion-telemetry-gcp-credentials` at hub scope.
 3. **API Types**: Add `Provider` field to `TelemetryCloudConfig` (§6.1).
 4. **Config Conversion**: Emit `SCION_TELEMETRY_CLOUD_PROVIDER` from `TelemetryConfigToEnv()` (§6.2).
 5. **Provisioning**: Ensure `CreateAgent` dispatch includes the telemetry secret when `provider: gcp` and the secret exists. Set `SCION_OTEL_GCP_CREDENTIALS` env var pointing to the mounted path.
 6. **Sciontool**: Update OTEL provider setup to load explicit credentials from `SCION_OTEL_GCP_CREDENTIALS` (§5.1).
 7. **Tests**: Unit tests for credential loading, env var emission, and fallback-to-ADC behavior.
 8. **Documentation**: Update operator runbook with GCP setup instructions and key rotation procedure.
+9. **Demo Scripts**: Update the demo-hub GCE provisioning scripts in `.hack/` to include telemetry SA key setup and injection configuration.
