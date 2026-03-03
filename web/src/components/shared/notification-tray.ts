@@ -68,6 +68,17 @@ export class ScionNotificationTray extends LitElement {
         this.notifications = [];
       }
     }
+    this.detectTruncation();
+  }
+
+  private detectTruncation(): void {
+    const messages = this.shadowRoot?.querySelectorAll('.notif-message');
+    if (!messages) return;
+    messages.forEach((el) => {
+      const badge = el.parentElement?.querySelector('.truncation-badge') as HTMLElement | null;
+      if (!badge) return;
+      badge.style.display = el.scrollHeight > el.clientHeight ? 'inline-flex' : 'none';
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -375,6 +386,26 @@ export class ScionNotificationTray extends LitElement {
       overflow: hidden;
     }
 
+    .truncation-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 0.375rem;
+      margin-top: 0.125rem;
+      font-size: 0.6875rem;
+      font-weight: 700;
+      line-height: 1.25rem;
+      border-radius: 0.5rem;
+      background: var(--scion-bg-subtle, #f1f5f9);
+      color: var(--scion-text-muted, #64748b);
+      cursor: pointer;
+      letter-spacing: 0.05em;
+    }
+
+    .truncation-badge:hover {
+      background: var(--scion-border, #e2e8f0);
+    }
+
     .notif-meta {
       display: flex;
       align-items: center;
@@ -494,8 +525,9 @@ export class ScionNotificationTray extends LitElement {
           <sl-icon name=${this.statusIcon(n.status)}></sl-icon>
         </div>
         <div class="notif-body">
+          <div class="notif-message">${n.message}</div>
           <sl-tooltip content=${n.message} hoist>
-            <div class="notif-message">${n.message}</div>
+            <span class="truncation-badge" style="display:none">...</span>
           </sl-tooltip>
           <div class="notif-meta">
             <span>${this.relativeTime(n.createdAt)}</span>

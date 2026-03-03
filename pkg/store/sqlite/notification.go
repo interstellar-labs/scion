@@ -189,6 +189,34 @@ func (s *SQLiteStore) GetNotifications(ctx context.Context, subscriberType, subs
 	return scanNotifications(rows)
 }
 
+// GetNotificationsByAgent returns notifications for a subscriber filtered by agent ID.
+// If onlyUnacknowledged is true, only unacknowledged notifications are returned.
+// Results are ordered by created_at DESC.
+func (s *SQLiteStore) GetNotificationsByAgent(ctx context.Context, agentID, subscriberType, subscriberID string, onlyUnacknowledged bool) ([]store.Notification, error) {
+	query := `
+		SELECT id, subscription_id, agent_id, grove_id,
+			subscriber_type, subscriber_id,
+			status, message, dispatched, acknowledged, created_at
+		FROM notifications
+		WHERE agent_id = ? AND subscriber_type = ? AND subscriber_id = ?
+	`
+	args := []interface{}{agentID, subscriberType, subscriberID}
+
+	if onlyUnacknowledged {
+		query += ` AND acknowledged = 0`
+	}
+
+	query += ` ORDER BY created_at DESC`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanNotifications(rows)
+}
+
 // AcknowledgeNotification marks a notification as acknowledged.
 func (s *SQLiteStore) AcknowledgeNotification(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx, `

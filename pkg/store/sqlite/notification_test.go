@@ -533,3 +533,110 @@ func TestMatchesActivity(t *testing.T) {
 	nilSub := &store.NotificationSubscription{}
 	assert.False(t, nilSub.MatchesActivity("COMPLETED"))
 }
+
+func TestGetNotificationsByAgent(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	// Create grove and two agents
+	groveID, agent1ID := createTestGroveAndAgent(t, s)
+	agent2ID := api.NewUUID()
+	agent2 := &store.Agent{
+		ID:         agent2ID,
+		Slug:       "notif-agent2-" + agent2ID[:8],
+		Name:       "Second Agent",
+		GroveID:    groveID,
+		Phase:      string(state.PhaseRunning),
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateAgent(ctx, agent2))
+
+	// Create subscriptions for both agents
+	sub1ID := uuid.New().String()
+	sub1 := &store.NotificationSubscription{
+		ID:                sub1ID,
+		AgentID:           agent1ID,
+		SubscriberType:    store.SubscriberTypeUser,
+		SubscriberID:      "user-by-agent",
+		GroveID:           groveID,
+		TriggerActivities: []string{"COMPLETED"},
+		CreatedBy:         "user-by-agent",
+	}
+	require.NoError(t, s.CreateNotificationSubscription(ctx, sub1))
+
+	sub2ID := uuid.New().String()
+	sub2 := &store.NotificationSubscription{
+		ID:                sub2ID,
+		AgentID:           agent2ID,
+		SubscriberType:    store.SubscriberTypeUser,
+		SubscriberID:      "user-by-agent",
+		GroveID:           groveID,
+		TriggerActivities: []string{"COMPLETED"},
+		CreatedBy:         "user-by-agent",
+	}
+	require.NoError(t, s.CreateNotificationSubscription(ctx, sub2))
+
+	// Create notifications for agent1 (2 notifications, one acked)
+	n1 := &store.Notification{
+		ID:             uuid.New().String(),
+		SubscriptionID: sub1ID,
+		AgentID:        agent1ID,
+		GroveID:        groveID,
+		SubscriberType: store.SubscriberTypeUser,
+		SubscriberID:   "user-by-agent",
+		Status:         "COMPLETED",
+		Message:        "agent1 completed first",
+		CreatedAt:      time.Now().Add(-2 * time.Second),
+	}
+	n2 := &store.Notification{
+		ID:             uuid.New().String(),
+		SubscriptionID: sub1ID,
+		AgentID:        agent1ID,
+		GroveID:        groveID,
+		SubscriberType: store.SubscriberTypeUser,
+		SubscriberID:   "user-by-agent",
+		Status:         "COMPLETED",
+		Message:        "agent1 completed second",
+		CreatedAt:      time.Now(),
+	}
+	require.NoError(t, s.CreateNotification(ctx, n1))
+	require.NoError(t, s.CreateNotification(ctx, n2))
+	require.NoError(t, s.AcknowledgeNotification(ctx, n1.ID))
+
+	// Create notification for agent2
+	n3 := &store.Notification{
+		ID:             uuid.New().String(),
+		SubscriptionID: sub2ID,
+		AgentID:        agent2ID,
+		GroveID:        groveID,
+		SubscriberType: store.SubscriberTypeUser,
+		SubscriberID:   "user-by-agent",
+		Status:         "COMPLETED",
+		Message:        "agent2 completed",
+	}
+	require.NoError(t, s.CreateNotification(ctx, n3))
+
+	// GetNotificationsByAgent for agent1 — all
+	notifs, err := s.GetNotificationsByAgent(ctx, agent1ID, store.SubscriberTypeUser, "user-by-agent", false)
+	require.NoError(t, err)
+	assert.Len(t, notifs, 2)
+	assert.Equal(t, n2.ID, notifs[0].ID, "most recent first")
+	assert.Equal(t, n1.ID, notifs[1].ID)
+
+	// GetNotificationsByAgent for agent1 — only unacknowledged
+	notifs, err = s.GetNotificationsByAgent(ctx, agent1ID, store.SubscriberTypeUser, "user-by-agent", true)
+	require.NoError(t, err)
+	assert.Len(t, notifs, 1)
+	assert.Equal(t, n2.ID, notifs[0].ID)
+
+	// GetNotificationsByAgent for agent2
+	notifs, err = s.GetNotificationsByAgent(ctx, agent2ID, store.SubscriberTypeUser, "user-by-agent", false)
+	require.NoError(t, err)
+	assert.Len(t, notifs, 1)
+	assert.Equal(t, n3.ID, notifs[0].ID)
+
+	// GetNotificationsByAgent for non-existent agent
+	notifs, err = s.GetNotificationsByAgent(ctx, "no-such-agent", store.SubscriberTypeUser, "user-by-agent", false)
+	require.NoError(t, err)
+	assert.Empty(t, notifs)
+}

@@ -697,6 +697,11 @@ type NotificationStore interface {
 	// Results are ordered by created_at DESC.
 	GetNotifications(ctx context.Context, subscriberType, subscriberID string, onlyUnacknowledged bool) ([]Notification, error)
 
+	// GetNotificationsByAgent returns notifications for a subscriber filtered by agent ID.
+	// If onlyUnacknowledged is true, only unacknowledged notifications are returned.
+	// Results are ordered by created_at DESC.
+	GetNotificationsByAgent(ctx context.Context, agentID, subscriberType, subscriberID string, onlyUnacknowledged bool) ([]Notification, error)
+
 	// AcknowledgeNotification marks a notification as acknowledged.
 	// Returns ErrNotFound if the notification doesn't exist.
 	AcknowledgeNotification(ctx context.Context, id string) error

@@ -222,6 +222,86 @@ func TestHandleNotifications_MethodNotAllowed(t *testing.T) {
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
 
+func TestHandleNotifications_FilterByAgent(t *testing.T) {
+	srv, s, _ := setupNotificationHandlerTest(t)
+	ctx := context.Background()
+
+	// The setup already created "agent-watched" with user notifications for "dev-user".
+	// Create a second agent that watches "agent-watched", so "agent-watched" is the
+	// subscriber (simulating notifications sent TO the watched agent).
+	agent2 := &store.Agent{
+		ID:      "agent-other",
+		Slug:    "other-agent",
+		Name:    "Other Agent",
+		GroveID: "grove-notif-handler",
+		Phase:   string(state.PhaseRunning),
+	}
+	require.NoError(t, s.CreateAgent(ctx, agent2))
+
+	// Create subscription: agent-watched subscribes to agent-other
+	sub2 := &store.NotificationSubscription{
+		ID:                api.NewUUID(),
+		AgentID:           "agent-other",
+		SubscriberType:    store.SubscriberTypeAgent,
+		SubscriberID:      "agent-watched",
+		GroveID:           "grove-notif-handler",
+		TriggerActivities: []string{"COMPLETED"},
+		CreatedAt:         time.Now(),
+		CreatedBy:         "test",
+	}
+	require.NoError(t, s.CreateNotificationSubscription(ctx, sub2))
+
+	// Notification sent TO agent-watched (subscriber)
+	agentNotif := &store.Notification{
+		ID:             api.NewUUID(),
+		SubscriptionID: sub2.ID,
+		AgentID:        "agent-other",
+		GroveID:        "grove-notif-handler",
+		SubscriberType: store.SubscriberTypeAgent,
+		SubscriberID:   "agent-watched",
+		Status:         "COMPLETED",
+		Message:        "agent-other completed (to agent-watched)",
+		Dispatched:     true,
+		Acknowledged:   false,
+		CreatedAt:      time.Now(),
+	}
+	require.NoError(t, s.CreateNotification(ctx, agentNotif))
+
+	// GET with agentId filter
+	rec := doRequest(t, srv, http.MethodGet, "/api/v1/notifications?agentId=agent-watched", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		UserNotifications  []store.Notification `json:"userNotifications"`
+		AgentNotifications []store.Notification `json:"agentNotifications"`
+	}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+
+	// User notifications: 1 unacknowledged for this agent (notif1 from setup)
+	assert.Len(t, resp.UserNotifications, 1)
+	assert.Equal(t, "COMPLETED", resp.UserNotifications[0].Status)
+
+	// Agent notifications: notifications sent TO agent-watched
+	assert.Len(t, resp.AgentNotifications, 1)
+	assert.Equal(t, "agent-watched", resp.AgentNotifications[0].SubscriberID)
+}
+
+func TestHandleNotifications_FilterByAgent_NoResults(t *testing.T) {
+	srv, _, _ := setupNotificationHandlerTest(t)
+
+	// Query for an agent with no notifications
+	rec := doRequest(t, srv, http.MethodGet, "/api/v1/notifications?agentId=nonexistent-agent", nil)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		UserNotifications  []store.Notification `json:"userNotifications"`
+		AgentNotifications []store.Notification `json:"agentNotifications"`
+	}
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Empty(t, resp.UserNotifications)
+	assert.Empty(t, resp.AgentNotifications)
+}
+
 func TestHandleNotifications_EmptyList(t *testing.T) {
 	srv, _ := testServer(t)
 

@@ -16,10 +16,15 @@ package hub
 
 import (
 	"net/http"
+
+	"github.com/ptone/scion-agent/pkg/store"
 )
 
 // handleNotifications handles GET /api/v1/notifications.
 // Lists notifications for the authenticated user.
+//
+// Without agentId: returns flat []Notification array (existing tray behavior).
+// With ?agentId=X: returns { userNotifications: [...], agentNotifications: [...] }.
 func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		MethodNotAllowed(w)
@@ -35,13 +40,42 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 	acknowledged := r.URL.Query().Get("acknowledged")
 	onlyUnacknowledged := acknowledged != "true"
 
-	notifs, err := s.store.GetNotifications(r.Context(), "user", user.ID(), onlyUnacknowledged)
+	agentID := r.URL.Query().Get("agentId")
+
+	if agentID == "" {
+		// Existing behaviour: flat array of user notifications
+		notifs, err := s.store.GetNotifications(r.Context(), "user", user.ID(), onlyUnacknowledged)
+		if err != nil {
+			writeErrorFromErr(w, err, "")
+			return
+		}
+		writeJSON(w, http.StatusOK, notifs)
+		return
+	}
+
+	// Agent-scoped: return combined response
+	userNotifs, err := s.store.GetNotificationsByAgent(r.Context(), agentID, "user", user.ID(), onlyUnacknowledged)
 	if err != nil {
 		writeErrorFromErr(w, err, "")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, notifs)
+	agentNotifs, err := s.store.GetNotifications(r.Context(), "agent", agentID, false)
+	if err != nil {
+		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, agentNotificationsResponse{
+		UserNotifications:  userNotifs,
+		AgentNotifications: agentNotifs,
+	})
+}
+
+// agentNotificationsResponse is returned when ?agentId= is provided.
+type agentNotificationsResponse struct {
+	UserNotifications  []store.Notification `json:"userNotifications"`
+	AgentNotifications []store.Notification `json:"agentNotifications"`
 }
 
 // handleNotificationRoutes handles requests under /api/v1/notifications/.

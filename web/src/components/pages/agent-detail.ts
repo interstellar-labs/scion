@@ -23,8 +23,13 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
-import type { PageData, Agent, Grove } from '../../shared/types.js';
+import type { PageData, Agent, Grove, Notification } from '../../shared/types.js';
 import { can, isTerminalAvailable, getAgentDisplayStatus, isAgentRunning } from '../../shared/types.js';
+
+interface AgentNotificationsResponse {
+  userNotifications: Notification[];
+  agentNotifications: Notification[];
+}
 import type { StatusType } from '../shared/status-badge.js';
 import { apiFetch } from '../../client/api.js';
 import { stateManager } from '../../client/state.js';
@@ -73,6 +78,18 @@ export class ScionPageAgentDetail extends LitElement {
    */
   @state()
   private actionLoading = false;
+
+  /**
+   * Notifications about this agent for the current user
+   */
+  @state()
+  private userNotifications: Notification[] = [];
+
+  /**
+   * Notifications sent TO this agent
+   */
+  @state()
+  private agentNotifications: Notification[] = [];
 
   static override styles = css`
     :host {
@@ -298,6 +315,120 @@ export class ScionPageAgentDetail extends LitElement {
       color: var(--scion-text, #1e293b);
     }
 
+    /* Notification items (agent detail card) */
+    .notif-section-title {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--scion-text-muted, #64748b);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 1rem 0 0.5rem 0;
+    }
+
+    .notif-section-title:first-of-type {
+      margin-top: 0;
+    }
+
+    .notif-list-item {
+      display: flex;
+      gap: 0.625rem;
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--scion-border, #e2e8f0);
+    }
+
+    .notif-list-item:last-child {
+      border-bottom: none;
+    }
+
+    .notif-icon {
+      flex-shrink: 0;
+      display: flex;
+      align-items: flex-start;
+      padding-top: 2px;
+    }
+
+    .notif-icon sl-icon {
+      font-size: 1rem;
+    }
+
+    .notif-icon.status-success sl-icon { color: var(--scion-success, #22c55e); }
+    .notif-icon.status-warning sl-icon { color: var(--scion-warning, #f59e0b); }
+    .notif-icon.status-danger sl-icon { color: var(--scion-danger, #ef4444); }
+    .notif-icon.status-info sl-icon { color: var(--scion-text-muted, #64748b); }
+
+    .notif-body {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .notif-message {
+      font-size: 0.8125rem;
+      line-height: 1.4;
+      color: var(--scion-text, #1e293b);
+      word-break: break-word;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .notif-truncation-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 0.375rem;
+      margin-top: 0.125rem;
+      font-size: 0.6875rem;
+      font-weight: 700;
+      line-height: 1.25rem;
+      border-radius: 0.5rem;
+      background: var(--scion-bg-subtle, #f1f5f9);
+      color: var(--scion-text-muted, #64748b);
+      cursor: pointer;
+      letter-spacing: 0.05em;
+    }
+
+    .notif-truncation-badge:hover {
+      background: var(--scion-border, #e2e8f0);
+    }
+
+    .notif-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.25rem;
+      font-size: 0.6875rem;
+      color: var(--scion-text-muted, #64748b);
+    }
+
+    .notif-mark-read {
+      border: none;
+      background: transparent;
+      color: var(--scion-text-muted, #64748b);
+      font-size: 0.6875rem;
+      cursor: pointer;
+      padding: 0;
+      transition: color 0.15s ease;
+    }
+
+    .notif-mark-read:hover {
+      color: var(--scion-primary, #3b82f6);
+    }
+
+    .notif-empty {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 1.5rem 0;
+      color: var(--scion-text-muted, #64748b);
+      font-size: 0.8125rem;
+    }
+
+    .notif-empty sl-icon {
+      font-size: 1.25rem;
+      opacity: 0.4;
+    }
+
     .loading-state {
       display: flex;
       flex-direction: column;
@@ -470,6 +601,20 @@ export class ScionPageAgentDetail extends LitElement {
           }
         } catch {
           // Grove loading is optional, don't fail if it doesn't work
+        }
+      }
+
+      // Load notifications for this agent
+      if (this.pageData?.user) {
+        try {
+          const notifRes = await apiFetch(`/api/v1/notifications?agentId=${this.agentId}`);
+          if (notifRes.ok) {
+            const data = (await notifRes.json()) as AgentNotificationsResponse;
+            this.userNotifications = data.userNotifications ?? [];
+            this.agentNotifications = data.agentNotifications ?? [];
+          }
+        } catch {
+          // Notification loading is optional
         }
       }
 
@@ -783,7 +928,107 @@ export class ScionPageAgentDetail extends LitElement {
             : ''}
         </div>
       </div>
+
+      ${this.renderNotificationsCard()}
     `;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Notifications card
+  // ---------------------------------------------------------------------------
+
+  private renderNotificationsCard() {
+    const hasUser = this.userNotifications.length > 0;
+    const hasAgent = this.agentNotifications.length > 0;
+
+    return html`
+      <div class="card">
+        <h3 class="card-title">Notifications</h3>
+        ${!hasUser && !hasAgent
+          ? html`<div class="notif-empty">
+              <sl-icon name="bell-slash"></sl-icon>
+              <span>No notifications for this agent</span>
+            </div>`
+          : html`
+              ${hasUser
+                ? html`
+                    ${hasAgent ? html`<div class="notif-section-title">Your Notifications</div>` : nothing}
+                    ${this.userNotifications.map((n) => this.renderNotifItem(n, true))}
+                  `
+                : nothing}
+              ${hasAgent
+                ? html`
+                    ${hasUser ? html`<div class="notif-section-title">Agent Notifications</div>` : nothing}
+                    ${this.agentNotifications.map((n) => this.renderNotifItem(n, false))}
+                  `
+                : nothing}
+            `}
+      </div>
+    `;
+  }
+
+  private renderNotifItem(n: Notification, canAck: boolean) {
+    return html`
+      <div class="notif-list-item">
+        <div class="notif-icon ${this.notifStatusClass(n.status)}">
+          <sl-icon name=${this.notifStatusIcon(n.status)}></sl-icon>
+        </div>
+        <div class="notif-body">
+          <div class="notif-message">${n.message}</div>
+          <sl-tooltip content=${n.message} hoist>
+            <span class="notif-truncation-badge" style="display:none">...</span>
+          </sl-tooltip>
+          <div class="notif-meta">
+            <span>${this.formatRelativeTime(n.createdAt)}</span>
+            ${canAck && !n.acknowledged
+              ? html`<button class="notif-mark-read" @click=${() => this.ackNotification(n.id)}>Mark read</button>`
+              : nothing}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private notifStatusIcon(status: string): string {
+    switch (status) {
+      case 'COMPLETED': return 'check-circle-fill';
+      case 'WAITING_FOR_INPUT': return 'exclamation-circle-fill';
+      case 'LIMITS_EXCEEDED': return 'x-circle-fill';
+      default: return 'info-circle-fill';
+    }
+  }
+
+  private notifStatusClass(status: string): string {
+    switch (status) {
+      case 'COMPLETED': return 'status-success';
+      case 'WAITING_FOR_INPUT': return 'status-warning';
+      case 'LIMITS_EXCEEDED': return 'status-danger';
+      default: return 'status-info';
+    }
+  }
+
+  private async ackNotification(id: string): Promise<void> {
+    try {
+      await apiFetch(`/api/v1/notifications/${id}/ack`, { method: 'POST' });
+      this.userNotifications = this.userNotifications.filter((n) => n.id !== id);
+    } catch {
+      // Ignore
+    }
+  }
+
+  override updated(changed: Map<string, unknown>): void {
+    super.updated(changed);
+    this.detectNotifTruncation();
+  }
+
+  private detectNotifTruncation(): void {
+    const messages = this.shadowRoot?.querySelectorAll('.notif-message');
+    if (!messages) return;
+    messages.forEach((el) => {
+      const badge = el.parentElement?.querySelector('.notif-truncation-badge') as HTMLElement | null;
+      if (!badge) return;
+      badge.style.display = el.scrollHeight > el.clientHeight ? 'inline-flex' : 'none';
+    });
   }
 
   private renderLoading() {
