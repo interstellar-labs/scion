@@ -1284,13 +1284,18 @@ func (s *Server) extractRequiredEnvKeys(req CreateAgentRequest) ([]string, map[s
 			}
 		}
 
-		// Template-level auth_selectedType takes highest precedence
+		// Template-level auth_selectedType takes high precedence
 		if req.Config != nil && req.Config.Template != "" && req.GrovePath != "" {
 			if tmpl, err := config.FindTemplateInGrovePath(req.Config.Template, req.GrovePath); err == nil {
 				if cfg, err := tmpl.LoadConfig(); err == nil && cfg != nil && cfg.AuthSelectedType != "" {
 					authType = cfg.AuthSelectedType
 				}
 			}
+		}
+
+		// --harness-auth CLI flag takes ultimate precedence
+		if req.Config != nil && req.Config.HarnessAuth != "" {
+			authType = req.Config.HarnessAuth
 		}
 
 		// When auth type is unset (auto-detect), check if resolved file secrets

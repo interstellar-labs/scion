@@ -1470,3 +1470,115 @@ profiles:
 		}
 	}
 }
+
+// TestEnvGather_HarnessAuthOverride tests that the --harness-auth CLI flag
+// (passed as config.harnessAuth) overrides auth type detection in env-gather.
+// This is a regression test: previously, --harness-auth api-key would fail
+// because extractRequiredEnvKeys did not consider the harnessAuth field,
+// so the broker skipped env-gather and then auth resolution failed because
+// the API key was not in the broker's environment.
+func TestEnvGather_HarnessAuthOverride(t *testing.T) {
+	// Set up a gemini harness config with no auth_selected_type (auto-detect).
+	// Provide an OAuth file secret so auto-detect would normally pick auth-file.
+	// But --harness-auth api-key should override to api-key, requiring GEMINI_API_KEY.
+	srv, _, groveDir := newTestServerWithHarnessConfig(t, "gemini",
+		"harness: gemini\nimage: test-image\nuser: scion\n",
+		`
+schema_version: "1"
+profiles:
+  default:
+    runtime: mock
+`)
+
+	body := `{
+		"name": "test-agent-harness-auth",
+		"id": "agent-uuid-ha",
+		"gatherEnv": true,
+		"grovePath": "` + groveDir + `",
+		"resolvedSecrets": [
+			{"name": "GEMINI_OAUTH_CREDS", "type": "file", "target": "/home/gemini/.gemini/oauth_creds.json", "value": "{}", "source": "user"}
+		],
+		"config": {"template": "gemini", "profile": "default", "harnessAuth": "api-key"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	// harnessAuth=api-key should override the auto-detected auth-file type,
+	// so GEMINI_API_KEY should be required and we should get 202.
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 (harnessAuth override requires GEMINI_API_KEY), got %d: %s", w.Code, w.Body.String())
+	}
+
+	var envReqs EnvRequirementsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &envReqs); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	found := false
+	for _, k := range envReqs.Needs {
+		if k == "GEMINI_API_KEY" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected GEMINI_API_KEY in needs when harnessAuth=api-key, got needs=%v required=%v", envReqs.Needs, envReqs.Required)
+	}
+}
+
+// TestEnvGather_HarnessAuthOverrideVertexAI tests that --harness-auth vertex-ai
+// overrides auto-detect and requires vertex-ai credentials even when an API key
+// would otherwise be detected as sufficient.
+func TestEnvGather_HarnessAuthOverrideVertexAI(t *testing.T) {
+	srv, _, groveDir := newTestServerWithHarnessConfig(t, "gemini",
+		"harness: gemini\nimage: test-image\nuser: scion\n",
+		`
+schema_version: "1"
+profiles:
+  default:
+    runtime: mock
+`)
+
+	body := `{
+		"name": "test-agent-harness-auth-vertex",
+		"id": "agent-uuid-hav",
+		"gatherEnv": true,
+		"grovePath": "` + groveDir + `",
+		"config": {"template": "gemini", "profile": "default", "harnessAuth": "vertex-ai"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	// harnessAuth=vertex-ai should require GOOGLE_CLOUD_PROJECT and region
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 (harnessAuth vertex-ai requires project/region), got %d: %s", w.Code, w.Body.String())
+	}
+
+	var envReqs EnvRequirementsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &envReqs); err != nil {
+		t.Fatal("failed to decode response:", err)
+	}
+
+	// Check that GOOGLE_CLOUD_PROJECT is required
+	foundProject := false
+	for _, k := range envReqs.Needs {
+		if k == "GOOGLE_CLOUD_PROJECT" {
+			foundProject = true
+		}
+	}
+	// Also check required list (may be satisfied by resolvedEnv)
+	for _, k := range envReqs.Required {
+		if k == "GOOGLE_CLOUD_PROJECT" {
+			foundProject = true
+		}
+	}
+	if !foundProject {
+		t.Errorf("expected GOOGLE_CLOUD_PROJECT in needs/required when harnessAuth=vertex-ai, got needs=%v required=%v", envReqs.Needs, envReqs.Required)
+	}
+}
