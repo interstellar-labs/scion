@@ -257,6 +257,32 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		}
 	}
 
+	// Inject profile/harness-config env vars into opts.Env so that
+	// GatherAuthWithEnv can see credentials like GOOGLE_CLOUD_PROJECT
+	// and GOOGLE_CLOUD_REGION declared in the active settings profile.
+	if settings != nil && !opts.BrokerMode {
+		var settingsEnv map[string]string
+		if harnessConfigName != "" {
+			if hcEntry, err := settings.ResolveHarnessConfig(profileName, harnessConfigName); err == nil {
+				settingsEnv = hcEntry.Env
+			}
+		} else if profileName != "" {
+			if p, ok := settings.Profiles[profileName]; ok {
+				settingsEnv = p.Env
+			}
+		}
+		if len(settingsEnv) > 0 {
+			if opts.Env == nil {
+				opts.Env = make(map[string]string)
+			}
+			for k, v := range settingsEnv {
+				if _, exists := opts.Env[k]; !exists {
+					opts.Env[k] = v
+				}
+			}
+		}
+	}
+
 	var auth api.AuthConfig
 	var resolvedAuth *api.ResolvedAuth
 	if !opts.NoAuth {

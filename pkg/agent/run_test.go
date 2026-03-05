@@ -1732,3 +1732,96 @@ profiles:
 		t.Errorf("SCION_HUB_URL = %q, want %q (env section should override all)", got, "http://host.docker.internal:8080")
 	}
 }
+
+func TestStartInjectsProfileEnvForAuth(t *testing.T) {
+	// When a profile defines env vars like GOOGLE_CLOUD_PROJECT and
+	// GOOGLE_CLOUD_REGION, Start() should inject them into opts.Env so that
+	// GatherAuthWithEnv can see them during local (non-broker) auth resolution.
+	tmpDir := t.TempDir()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	// Clear env vars that would interfere
+	for _, k := range []string{"GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_REGION"} {
+		if old, ok := os.LookupEnv(k); ok {
+			defer os.Setenv(k, old)
+			os.Unsetenv(k)
+		}
+	}
+
+	globalScionDir := filepath.Join(tmpDir, ".scion")
+
+	// Create harness-config on disk (claude type)
+	hcDir := filepath.Join(globalScionDir, "harness-configs", "claude-cfg")
+	os.MkdirAll(hcDir, 0755)
+	os.WriteFile(filepath.Join(hcDir, "config.yaml"), []byte("harness: claude\nuser: scion\nimage: test-image:latest\n"), 0644)
+
+	// Create a minimal template
+	tplDir := filepath.Join(globalScionDir, "templates", "default")
+	os.MkdirAll(tplDir, 0755)
+	os.WriteFile(filepath.Join(tplDir, "scion-agent.json"), []byte(`{"default_harness_config": "claude-cfg"}`), 0644)
+
+	// Global versioned settings with a profile that has env vars
+	os.WriteFile(filepath.Join(globalScionDir, "settings.yaml"), []byte(`schema_version: "1"
+active_profile: vertex
+profiles:
+  vertex:
+    runtime: docker
+    env:
+      GOOGLE_CLOUD_PROJECT: my-gcp-project
+      GOOGLE_CLOUD_REGION: us-central1
+runtimes:
+  docker:
+    type: docker
+`), 0644)
+
+	// Create project grove
+	projectDir := filepath.Join(tmpDir, "project")
+	projectScionDir := filepath.Join(projectDir, ".scion")
+	os.MkdirAll(projectScionDir, 0755)
+
+	// Capture the RunConfig
+	var capturedConfig runtime.RunConfig
+	mockRT := &runtime.MockRuntime{
+		ListFunc: func(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+			return []api.AgentInfo{}, nil
+		},
+		RunFunc: func(ctx context.Context, cfg runtime.RunConfig) (string, error) {
+			capturedConfig = cfg
+			return "mock-id", nil
+		},
+	}
+
+	mgr := NewManager(mockRT)
+
+	_, err := mgr.Start(context.Background(), api.StartOptions{
+		Name:      "test-agent",
+		GrovePath: projectScionDir,
+		NoAuth:    true,
+	})
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Convert env slice to map
+	envMap := make(map[string]string)
+	for _, e := range capturedConfig.Env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	if got := envMap["GOOGLE_CLOUD_PROJECT"]; got != "my-gcp-project" {
+		t.Errorf("GOOGLE_CLOUD_PROJECT = %q, want %q", got, "my-gcp-project")
+	}
+	if got := envMap["GOOGLE_CLOUD_REGION"]; got != "us-central1" {
+		t.Errorf("GOOGLE_CLOUD_REGION = %q, want %q", got, "us-central1")
+	}
+}
