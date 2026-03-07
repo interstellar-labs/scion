@@ -146,6 +146,10 @@ type OAuthConfig struct {
 // GlobalConfig holds the complete server configuration.
 // This is distinct from hub.ServerConfig which only holds HTTP server settings.
 type GlobalConfig struct {
+	// Mode selects the server operating mode: "workstation" (default) or "production".
+	// When set to "production" in settings.yaml, the server behaves as if --production were passed.
+	Mode string `json:"mode,omitempty" yaml:"mode,omitempty" koanf:"mode"`
+
 	// Hub API server settings
 	Hub HubServerConfig `json:"hub" yaml:"hub" koanf:"hub"`
 
@@ -541,6 +545,39 @@ func applyEnvOverrides(gc *GlobalConfig) error {
 	}
 
 	return nil
+}
+
+// LoadServerMode reads just the server mode from settings.yaml without loading the full config.
+// Returns "production" if mode is explicitly set to "production", empty string otherwise.
+func LoadServerMode() string {
+	globalDir, err := GetGlobalDir()
+	if err != nil {
+		return ""
+	}
+
+	settingsPath := filepath.Join(globalDir, "settings.yaml")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return ""
+	}
+
+	var raw map[string]interface{}
+	if err := yamlv3.Unmarshal(data, &raw); err != nil {
+		return ""
+	}
+
+	serverRaw, ok := raw["server"]
+	if !ok || serverRaw == nil {
+		return ""
+	}
+
+	serverMap, ok := serverRaw.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	mode, _ := serverMap["mode"].(string)
+	return mode
 }
 
 // GetServerConfigPath returns the path to server.yaml (or server.yml) in the given directory,

@@ -577,3 +577,65 @@ func TestApplyEnvOverridesCommaSeparatedLists(t *testing.T) {
 		t.Errorf("expected authorized domains [x.com, y.com], got %v", gc.Auth.AuthorizedDomains)
 	}
 }
+
+func TestLoadServerMode_Production(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	err := os.WriteFile(settingsPath, []byte(`schema_version: "1"
+server:
+  mode: production
+  hub:
+    port: 9810
+`), 0644)
+	if err != nil {
+		t.Fatalf("failed to write settings.yaml: %v", err)
+	}
+
+	// LoadServerMode reads from the global dir, so we need to override it.
+	// Instead, test the underlying parsing logic via loadServerFromSettingsFile.
+	gc, found := loadServerFromSettingsFile(dir)
+	if !found {
+		t.Fatal("expected to find server config in settings.yaml")
+	}
+	if gc.Mode != "production" {
+		t.Errorf("expected mode 'production', got %q", gc.Mode)
+	}
+}
+
+func TestLoadServerMode_Workstation(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	err := os.WriteFile(settingsPath, []byte(`schema_version: "1"
+server:
+  hub:
+    port: 9810
+`), 0644)
+	if err != nil {
+		t.Fatalf("failed to write settings.yaml: %v", err)
+	}
+
+	gc, found := loadServerFromSettingsFile(dir)
+	if !found {
+		t.Fatal("expected to find server config in settings.yaml")
+	}
+	if gc.Mode != "" {
+		t.Errorf("expected empty mode (workstation default), got %q", gc.Mode)
+	}
+}
+
+func TestLoadServerMode_NoServerKey(t *testing.T) {
+	dir := t.TempDir()
+	settingsPath := filepath.Join(dir, "settings.yaml")
+	err := os.WriteFile(settingsPath, []byte(`schema_version: "1"
+hub:
+  endpoint: http://example.com
+`), 0644)
+	if err != nil {
+		t.Fatalf("failed to write settings.yaml: %v", err)
+	}
+
+	_, found := loadServerFromSettingsFile(dir)
+	if found {
+		t.Fatal("expected not to find server config in settings.yaml")
+	}
+}

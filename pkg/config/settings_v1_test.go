@@ -1408,6 +1408,31 @@ func TestConvertV1ServerToGlobalConfig_Basic(t *testing.T) {
 	assert.Equal(t, "local", gc.Secrets.Backend)
 }
 
+func TestConvertV1ServerToGlobalConfig_Mode(t *testing.T) {
+	v1 := &V1ServerConfig{
+		Mode: "production",
+	}
+	gc := ConvertV1ServerToGlobalConfig(v1)
+	assert.Equal(t, "production", gc.Mode)
+
+	// Empty mode should leave it empty (workstation default)
+	v1Empty := &V1ServerConfig{}
+	gcEmpty := ConvertV1ServerToGlobalConfig(v1Empty)
+	assert.Equal(t, "", gcEmpty.Mode)
+}
+
+func TestConvertGlobalToV1ServerConfig_Mode(t *testing.T) {
+	gc := DefaultGlobalConfig()
+	gc.Mode = "production"
+
+	v1 := ConvertGlobalToV1ServerConfig(&gc)
+	assert.Equal(t, "production", v1.Mode)
+
+	// Round-trip
+	gc2 := ConvertV1ServerToGlobalConfig(v1)
+	assert.Equal(t, "production", gc2.Mode)
+}
+
 func TestConvertV1ServerToGlobalConfig_Nil(t *testing.T) {
 	gc := ConvertV1ServerToGlobalConfig(nil)
 	assert.NotNil(t, gc)

@@ -285,6 +285,13 @@ func runServerStartOrDaemon(cmd *cobra.Command, args []string) error {
 			pid, daemon.GetLogPathComponent(serverDaemonComponent, globalDir))
 	}
 
+	// Check if production mode is set in config (settings.yaml server.mode)
+	if !cmd.Flags().Changed("production") {
+		if mode := config.LoadServerMode(); mode == "production" {
+			productionMode = true
+		}
+	}
+
 	// Apply workstation defaults when not in production mode.
 	// Workstation mode enables all components, dev-auth, auto-provide,
 	// and binds to loopback (127.0.0.1) for single-user security.
@@ -379,6 +386,11 @@ func runServerStartOrDaemon(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to start daemon: %w", err)
 	}
 
+	// Save the daemon args for restart
+	if err := daemon.SaveArgs(serverDaemonComponent, globalDir, daemonArgs); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to save daemon args: %v\n", err)
+	}
+
 	// Verify it started
 	time.Sleep(500 * time.Millisecond)
 	running, pid, err = daemon.StatusComponent(serverDaemonComponent, globalDir)
@@ -453,33 +465,32 @@ func runServerRestart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to find scion executable: %w", err)
 	}
 
-	// Re-read the saved args from the log file name... actually we just re-launch
-	// with a minimal foreground arg set. The user should use stop + start to change flags.
-	// For restart, we launch with --foreground so the daemon wrapper re-daemonizes it.
-	// Actually, we need to start a new daemon. We'll use the same approach as broker restart:
-	// just start with the enable flags the user passed to the restart command, or if none
-	// are given, with all components enabled.
-	daemonArgs := []string{"server", "start", "--foreground"}
+	// Load saved args from previous start, or fall back to reconstructing from flags.
+	daemonArgs, err := daemon.LoadArgs(serverDaemonComponent, globalDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to load saved args: %v\n", err)
+	}
 
-	// If no component flags are provided, the restart just relaunches.
-	// We pass all enable flags since we can't know what the original launch used.
-	// The user should use stop+start if they want different flags.
-	if enableHub || enableRuntimeBroker || enableWeb {
-		if enableHub {
-			daemonArgs = append(daemonArgs, "--enable-hub")
+	if daemonArgs == nil {
+		// No saved args — reconstruct from current flags (legacy behavior).
+		daemonArgs = []string{"server", "start", "--foreground"}
+		if enableHub || enableRuntimeBroker || enableWeb {
+			if enableHub {
+				daemonArgs = append(daemonArgs, "--enable-hub")
+			}
+			if enableRuntimeBroker {
+				daemonArgs = append(daemonArgs, "--enable-runtime-broker")
+			}
+			if enableWeb {
+				daemonArgs = append(daemonArgs, "--enable-web")
+			}
 		}
-		if enableRuntimeBroker {
-			daemonArgs = append(daemonArgs, "--enable-runtime-broker")
+		if enableDevAuth {
+			daemonArgs = append(daemonArgs, "--dev-auth")
 		}
-		if enableWeb {
-			daemonArgs = append(daemonArgs, "--enable-web")
+		if enableDebug {
+			daemonArgs = append(daemonArgs, "--debug")
 		}
-	}
-	if enableDevAuth {
-		daemonArgs = append(daemonArgs, "--dev-auth")
-	}
-	if enableDebug {
-		daemonArgs = append(daemonArgs, "--debug")
 	}
 
 	fmt.Println("Starting server with new binary...")
@@ -648,6 +659,14 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadGlobalConfig(serverConfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Check if production mode is set in config (settings.yaml server.mode).
+	// The config value is only consulted if --production was not explicitly passed.
+	if !cmd.Flags().Changed("production") {
+		if cfg.Mode == "production" {
+			productionMode = true
+		}
 	}
 
 	// Apply workstation defaults when not in production mode.

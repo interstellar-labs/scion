@@ -16,6 +16,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -194,6 +195,50 @@ func GetLogPathComponent(component, globalDir string) string {
 // GetPIDPathComponent returns the path to the component-specific PID file.
 func GetPIDPathComponent(component, globalDir string) string {
 	return filepath.Join(globalDir, PIDFileName(component))
+}
+
+// ArgsFileName returns the saved-args filename for the given component (e.g. "server" -> "server-args.json").
+func ArgsFileName(component string) string {
+	return component + "-args.json"
+}
+
+// SaveArgs persists the daemon launch arguments so that restart can re-use them.
+func SaveArgs(component, globalDir string, args []string) error {
+	argsPath := filepath.Join(globalDir, ArgsFileName(component))
+	data, err := json.Marshal(args)
+	if err != nil {
+		return fmt.Errorf("failed to marshal args: %w", err)
+	}
+	return os.WriteFile(argsPath, data, 0644)
+}
+
+// LoadArgs reads previously saved daemon launch arguments.
+// Returns nil if no saved args exist.
+func LoadArgs(component, globalDir string) ([]string, error) {
+	argsPath := filepath.Join(globalDir, ArgsFileName(component))
+	data, err := os.ReadFile(argsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var args []string
+	if err := json.Unmarshal(data, &args); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal args: %w", err)
+	}
+	return args, nil
+}
+
+// RemoveArgs removes the saved args file for a component.
+func RemoveArgs(component, globalDir string) error {
+	argsPath := filepath.Join(globalDir, ArgsFileName(component))
+	err := os.Remove(argsPath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 // --- Legacy broker-specific functions (delegate to component-based API) ---

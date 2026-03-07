@@ -167,6 +167,9 @@ type VersionedSettings struct {
 // This mirrors GlobalConfig but uses snake_case koanf/yaml tags.
 // Only valid at the global level (~/.scion/settings.yaml), never in grove-level settings.
 type V1ServerConfig struct {
+	// Mode selects the server operating mode: "workstation" (default) or "production".
+	// When set to "production", the server behaves as if --production were passed.
+	Mode      string              `json:"mode,omitempty" yaml:"mode,omitempty" koanf:"mode"`
 	Env       string              `json:"env,omitempty" yaml:"env,omitempty" koanf:"env"`
 	Hub       *V1ServerHubConfig  `json:"hub,omitempty" yaml:"hub,omitempty" koanf:"hub"`
 	Broker    *V1BrokerConfig     `json:"broker,omitempty" yaml:"broker,omitempty" koanf:"broker"`
@@ -701,6 +704,11 @@ func ConvertV1ServerToGlobalConfig(v1 *V1ServerConfig) *GlobalConfig {
 
 	gc := DefaultGlobalConfig()
 
+	// Mode
+	if v1.Mode != "" {
+		gc.Mode = v1.Mode
+	}
+
 	// Top-level fields
 	if v1.LogLevel != "" {
 		gc.LogLevel = v1.LogLevel
@@ -900,6 +908,7 @@ func ConvertGlobalToV1ServerConfig(gc *GlobalConfig) *V1ServerConfig {
 	}
 
 	v1 := &V1ServerConfig{
+		Mode:      gc.Mode,
 		LogLevel:  gc.LogLevel,
 		LogFormat: gc.LogFormat,
 	}

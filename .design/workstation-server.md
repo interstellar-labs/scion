@@ -292,15 +292,15 @@ This would probe the health endpoints (`/healthz`) on the known ports, and check
 5. ✅ **Disable GCP logging** in workstation mode unless explicitly enabled via `SCION_LOG_GCP`.
 6. ✅ **Force local storage/secrets backends** in workstation mode unless explicitly overridden.
 
-### Phase 3: Configuration Support (pkg/config)
+### Phase 3: Configuration Support (pkg/config) ✅ COMPLETE
 
-1. **Support `mode: production` in `settings.yaml`** so production deployments can set the mode once:
+1. ✅ **Support `mode: production` in `settings.yaml`** so production deployments can set the mode once:
    ```yaml
    server:
      mode: production
    ```
    When `mode: production` is set in config, the server behaves as if `--production` were passed. Workstation mode remains the default when no mode is configured.
-2. **Persist daemon args** so `scion server restart` can re-launch with the same flags without requiring the user to re-specify them. Store in `~/.scion/server-args.json`.
+2. ✅ **Persist daemon args** so `scion server restart` can re-launch with the same flags without requiring the user to re-specify them. Store in `~/.scion/server-args.json`.
 
 ### Phase 4: Polish
 

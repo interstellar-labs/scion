@@ -202,6 +202,76 @@ func TestGetPIDPath(t *testing.T) {
 	assert.Contains(t, path, "broker.pid")
 }
 
+func TestArgsFileName(t *testing.T) {
+	assert.Equal(t, "server-args.json", ArgsFileName("server"))
+	assert.Equal(t, "broker-args.json", ArgsFileName("broker"))
+}
+
+func TestSaveLoadArgs(t *testing.T) {
+	dir := t.TempDir()
+
+	args := []string{"server", "start", "--foreground", "--production", "--enable-hub"}
+	err := SaveArgs("server", dir, args)
+	require.NoError(t, err)
+
+	loaded, err := LoadArgs("server", dir)
+	require.NoError(t, err)
+	assert.Equal(t, args, loaded)
+
+	// Verify file exists
+	assert.FileExists(t, filepath.Join(dir, "server-args.json"))
+}
+
+func TestLoadArgs_NoFile(t *testing.T) {
+	dir := t.TempDir()
+
+	loaded, err := LoadArgs("server", dir)
+	assert.NoError(t, err)
+	assert.Nil(t, loaded)
+}
+
+func TestRemoveArgs(t *testing.T) {
+	dir := t.TempDir()
+
+	args := []string{"server", "start", "--foreground"}
+	err := SaveArgs("server", dir, args)
+	require.NoError(t, err)
+
+	err = RemoveArgs("server", dir)
+	assert.NoError(t, err)
+
+	loaded, err := LoadArgs("server", dir)
+	assert.NoError(t, err)
+	assert.Nil(t, loaded)
+}
+
+func TestRemoveArgs_NoFile(t *testing.T) {
+	dir := t.TempDir()
+
+	err := RemoveArgs("server", dir)
+	assert.NoError(t, err)
+}
+
+func TestSaveLoadArgs_ComponentIsolation(t *testing.T) {
+	dir := t.TempDir()
+
+	serverArgs := []string{"server", "start", "--foreground", "--enable-hub"}
+	brokerArgs := []string{"server", "start", "--foreground", "--production", "--enable-runtime-broker"}
+
+	err := SaveArgs("server", dir, serverArgs)
+	require.NoError(t, err)
+	err = SaveArgs("broker", dir, brokerArgs)
+	require.NoError(t, err)
+
+	loadedServer, err := LoadArgs("server", dir)
+	require.NoError(t, err)
+	assert.Equal(t, serverArgs, loadedServer)
+
+	loadedBroker, err := LoadArgs("broker", dir)
+	require.NoError(t, err)
+	assert.Equal(t, brokerArgs, loadedBroker)
+}
+
 func TestLegacyDelegatesToBrokerComponent(t *testing.T) {
 	dir := t.TempDir()
 
