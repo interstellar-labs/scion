@@ -198,6 +198,35 @@ export function isAgentRunning(agent: Agent): boolean {
 }
 
 /**
+ * Inline configuration values set at agent creation time.
+ */
+export interface AgentInlineConfig {
+  max_turns?: number;
+  max_model_calls?: number;
+  max_duration?: string;
+  model?: string;
+  branch?: string;
+  task?: string;
+  image?: string;
+}
+
+/**
+ * Applied configuration snapshot captured at agent creation time.
+ */
+export interface AgentAppliedConfig {
+  image?: string;
+  harnessConfig?: string;
+  harnessAuth?: string;
+  model?: string;
+  profile?: string;
+  task?: string;
+  attach?: boolean;
+  workspace?: string;
+  creatorName?: string;
+  inlineConfig?: AgentInlineConfig;
+}
+
+/**
  * Agent information from the Hub API
  */
 export interface Agent {
@@ -219,6 +248,20 @@ export interface Agent {
   runtimeBrokerId?: string;
   runtimeBrokerName?: string;
   _capabilities?: Capabilities;
+
+  // Configuration tab fields
+  slug?: string;
+  image?: string;
+  runtime?: string;
+  visibility?: string;
+  createdBy?: string;
+  appliedConfig?: AgentAppliedConfig;
+
+  // Status tab fields (limits tracking)
+  currentTurns?: number;
+  currentModelCalls?: number;
+  startedAt?: string;
+  connectionState?: string;
 }
 
 /**

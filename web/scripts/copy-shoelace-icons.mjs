@@ -21,6 +21,7 @@ const DEST = resolve(ROOT, 'public/shoelace/assets/icons');
 /** Icons referenced via <sl-icon name="..."> across the app. */
 const USED_ICONS = [
   'arrow-clockwise',
+  'bell-slash',
   'arrow-down-circle',
   'arrow-left',
   'arrow-left-circle',
@@ -29,6 +30,7 @@ const USED_ICONS = [
   'box-arrow-in-right',
   'box-arrow-right',
   'check-circle',
+  'check-circle-fill',
   'circle',
   'circle-fill',
   'clock',
@@ -38,6 +40,7 @@ const USED_ICONS = [
   'diagram-3',
   'download',
   'emoji-frown',
+  'exclamation-circle-fill',
   'exclamation-octagon',
   'exclamation-triangle',
   'eye-slash',
@@ -56,6 +59,7 @@ const USED_ICONS = [
   'house',
   'hourglass-split',
   'info-circle',
+  'info-circle-fill',
   'list',
   'list-ul',
   'moon',
@@ -77,6 +81,7 @@ const USED_ICONS = [
   'trash',
   'upload',
   'x-circle',
+  'x-circle-fill',
 ];
 
 mkdirSync(DEST, { recursive: true });

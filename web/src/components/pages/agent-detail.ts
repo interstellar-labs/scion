@@ -17,14 +17,27 @@
 /**
  * Agent detail page component
  *
- * Displays detailed information about a single agent
+ * Header + Two-Tab layout (Status / Configuration) as specified in
+ * .design/hosted/agent-detail-layout.md
  */
 
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
-import type { PageData, Agent, Grove, Notification } from '../../shared/types.js';
-import { can, isTerminalAvailable, getAgentDisplayStatus, isAgentRunning } from '../../shared/types.js';
+import type {
+  PageData,
+  Agent,
+  AgentAppliedConfig,
+  AgentInlineConfig,
+  Grove,
+  Notification,
+} from '../../shared/types.js';
+import {
+  can,
+  isTerminalAvailable,
+  getAgentDisplayStatus,
+  isAgentRunning,
+} from '../../shared/types.js';
 
 interface AgentNotificationsResponse {
   userNotifications: Notification[];
@@ -35,59 +48,73 @@ import { apiFetch } from '../../client/api.js';
 import { stateManager } from '../../client/state.js';
 import '../shared/status-badge.js';
 
+/**
+ * Parse a Go-style duration string (e.g. "2h30m", "1h", "45m", "90s") into
+ * total seconds. Returns 0 if the string cannot be parsed.
+ */
+function parseDuration(s: string): number {
+  if (!s) return 0;
+  let total = 0;
+  const re = /(\d+(?:\.\d+)?)\s*(h|m|s)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(s)) !== null) {
+    const val = parseFloat(match[1]);
+    switch (match[2]) {
+      case 'h':
+        total += val * 3600;
+        break;
+      case 'm':
+        total += val * 60;
+        break;
+      case 's':
+        total += val;
+        break;
+    }
+  }
+  return total;
+}
+
+/**
+ * Format seconds as "Xh Ym Zs".
+ */
+function formatDurationHMS(totalSeconds: number): string {
+  if (totalSeconds <= 0) return '0s';
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  const parts: string[] = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  if (s > 0 || parts.length === 0) parts.push(`${s}s`);
+  return parts.join(' ');
+}
+
 @customElement('scion-page-agent-detail')
 export class ScionPageAgentDetail extends LitElement {
-  /**
-   * Page data from SSR
-   */
   @property({ type: Object })
   pageData: PageData | null = null;
 
-  /**
-   * Agent ID from URL
-   */
   @property({ type: String })
   agentId = '';
 
-  /**
-   * Loading state
-   */
   @state()
   private loading = true;
 
-  /**
-   * Agent data
-   */
   @state()
   private agent: Agent | null = null;
 
-  /**
-   * Parent grove data
-   */
   @state()
   private grove: Grove | null = null;
 
-  /**
-   * Error message if loading failed
-   */
   @state()
   private error: string | null = null;
 
-  /**
-   * Action in progress
-   */
   @state()
   private actionLoading = false;
 
-  /**
-   * Notifications about this agent for the current user
-   */
   @state()
   private userNotifications: Notification[] = [];
 
-  /**
-   * Notifications sent TO this agent
-   */
   @state()
   private agentNotifications: Notification[] = [];
 
@@ -96,6 +123,7 @@ export class ScionPageAgentDetail extends LitElement {
       display: block;
     }
 
+    /* ---- Back link ---- */
     .back-link {
       display: inline-flex;
       align-items: center;
@@ -105,11 +133,11 @@ export class ScionPageAgentDetail extends LitElement {
       font-size: 0.875rem;
       margin-bottom: 1rem;
     }
-
     .back-link:hover {
       color: var(--scion-primary, #3b82f6);
     }
 
+    /* ---- Header ---- */
     .header {
       display: flex;
       align-items: flex-start;
@@ -117,37 +145,31 @@ export class ScionPageAgentDetail extends LitElement {
       margin-bottom: 1.5rem;
       gap: 1rem;
     }
-
     .header-info {
       flex: 1;
     }
-
     .header-title {
       display: flex;
       align-items: center;
       gap: 0.75rem;
       margin-bottom: 0.5rem;
     }
-
     .header-title sl-icon {
       color: var(--scion-primary, #3b82f6);
       font-size: 1.5rem;
     }
-
     .header h1 {
       font-size: 1.5rem;
       font-weight: 700;
       color: var(--scion-text, #1e293b);
       margin: 0;
     }
-
     .header-meta {
       display: flex;
       align-items: center;
       gap: 1rem;
       margin-top: 0.5rem;
     }
-
     .template-badge {
       display: inline-flex;
       align-items: center;
@@ -158,20 +180,7 @@ export class ScionPageAgentDetail extends LitElement {
       font-size: 0.875rem;
       color: var(--scion-text-muted, #64748b);
     }
-
-    .grove-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.25rem;
-      color: var(--scion-text-muted, #64748b);
-      text-decoration: none;
-      font-size: 0.875rem;
-    }
-
-    .grove-link:hover {
-      color: var(--scion-primary, #3b82f6);
-    }
-
+    .grove-link,
     .broker-link {
       display: inline-flex;
       align-items: center;
@@ -180,17 +189,59 @@ export class ScionPageAgentDetail extends LitElement {
       text-decoration: none;
       font-size: 0.875rem;
     }
-
+    .grove-link:hover,
     .broker-link:hover {
       color: var(--scion-primary, #3b82f6);
     }
-
     .header-actions {
       display: flex;
       gap: 0.5rem;
       flex-shrink: 0;
     }
 
+    /* ---- Error banner ---- */
+    .agent-error-banner {
+      background: var(--sl-color-danger-50, #fef2f2);
+      border: 1px solid var(--sl-color-danger-200, #fecaca);
+      border-radius: var(--scion-radius-lg, 0.75rem);
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+    .agent-error-banner sl-icon {
+      color: var(--sl-color-danger-500, #ef4444);
+      font-size: 1.25rem;
+      flex-shrink: 0;
+      margin-top: 0.125rem;
+    }
+    .agent-error-banner .error-content {
+      flex: 1;
+      min-width: 0;
+    }
+    .agent-error-banner .error-title {
+      font-weight: 600;
+      color: var(--sl-color-danger-700, #b91c1c);
+      margin-bottom: 0.25rem;
+    }
+    .agent-error-banner .error-message {
+      font-size: 0.875rem;
+      color: var(--sl-color-danger-600, #dc2626);
+      font-family: var(--scion-font-mono, monospace);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* ---- Tabs ---- */
+    sl-tab-group {
+      --track-color: var(--scion-border, #e2e8f0);
+    }
+    sl-tab-group::part(body) {
+      padding-top: 1.5rem;
+    }
+
+    /* ---- Cards ---- */
     .card {
       background: var(--scion-surface, #ffffff);
       border: 1px solid var(--scion-border, #e2e8f0);
@@ -198,7 +249,6 @@ export class ScionPageAgentDetail extends LitElement {
       padding: 1.5rem;
       margin-bottom: 1.5rem;
     }
-
     .card-title {
       font-size: 1rem;
       font-weight: 600;
@@ -208,17 +258,16 @@ export class ScionPageAgentDetail extends LitElement {
       border-bottom: 1px solid var(--scion-border, #e2e8f0);
     }
 
+    /* ---- Info grid ---- */
     .info-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
       gap: 1.5rem;
     }
-
     .info-item {
       display: flex;
       flex-direction: column;
     }
-
     .info-label {
       font-size: 0.75rem;
       color: var(--scion-text-muted, #64748b);
@@ -226,109 +275,71 @@ export class ScionPageAgentDetail extends LitElement {
       letter-spacing: 0.05em;
       margin-bottom: 0.25rem;
     }
-
     .info-value {
       font-size: 1rem;
       color: var(--scion-text, #1e293b);
     }
-
     .info-value.mono {
       font-family: var(--scion-font-mono, monospace);
       font-size: 0.875rem;
     }
 
+    /* ---- Task summary ---- */
     .task-summary {
       font-size: 1rem;
       color: var(--scion-text, #1e293b);
       padding: 1rem;
       background: var(--scion-bg-subtle, #f1f5f9);
       border-radius: var(--scion-radius, 0.5rem);
-      margin-top: 1rem;
       white-space: pre-wrap;
       line-height: 1.5;
     }
 
-    .status-timeline {
+    /* ---- Progress bars ---- */
+    .limits-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 1.5rem;
+    }
+    .limit-item {
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
+      gap: 0.5rem;
     }
-
-    .timeline-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.75rem;
-    }
-
-    .timeline-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--scion-border, #e2e8f0);
-      margin-top: 0.35rem;
-      flex-shrink: 0;
-    }
-
-    .timeline-dot.active {
-      background: var(--sl-color-success-500, #22c55e);
-    }
-
-    .timeline-content {
-      flex: 1;
-    }
-
-    .timeline-title {
-      font-weight: 500;
-      color: var(--scion-text, #1e293b);
-    }
-
-    .timeline-time {
+    .limit-label {
       font-size: 0.75rem;
       color: var(--scion-text-muted, #64748b);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
-
-    .quick-actions {
-      display: flex;
-      gap: 1rem;
-    }
-
-    .quick-action {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 1.5rem;
-      background: var(--scion-surface, #ffffff);
-      border: 1px solid var(--scion-border, #e2e8f0);
-      border-radius: var(--scion-radius-lg, 0.75rem);
-      cursor: pointer;
-      transition: all var(--scion-transition-fast, 150ms ease);
-      text-decoration: none;
-      color: inherit;
-      flex: 1;
-    }
-
-    .quick-action:hover:not([disabled]) {
-      border-color: var(--scion-primary, #3b82f6);
-      box-shadow: var(--scion-shadow-md, 0 4px 6px -1px rgba(0, 0, 0, 0.1));
-    }
-
-    .quick-action[disabled] {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .quick-action sl-icon {
-      font-size: 2rem;
-      color: var(--scion-primary, #3b82f6);
-      margin-bottom: 0.5rem;
-    }
-
-    .quick-action span {
-      font-weight: 500;
+    .limit-value {
+      font-size: 1rem;
       color: var(--scion-text, #1e293b);
+      font-weight: 500;
+    }
+    .progress-bar-track {
+      width: 100%;
+      height: 6px;
+      background: var(--scion-bg-subtle, #f1f5f9);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+    .progress-bar-fill.normal {
+      background: var(--scion-success-500, #22c55e);
+    }
+    .progress-bar-fill.warning {
+      background: var(--scion-warning-500, #f59e0b);
+    }
+    .progress-bar-fill.danger {
+      background: var(--scion-danger-500, #ef4444);
     }
 
-    /* Notification items (agent detail card) */
+    /* ---- Notification items ---- */
     .notif-section-title {
       font-size: 0.8125rem;
       font-weight: 600;
@@ -337,43 +348,43 @@ export class ScionPageAgentDetail extends LitElement {
       letter-spacing: 0.05em;
       margin: 1rem 0 0.5rem 0;
     }
-
     .notif-section-title:first-of-type {
       margin-top: 0;
     }
-
     .notif-list-item {
       display: flex;
       gap: 0.625rem;
       padding: 0.625rem 0;
       border-bottom: 1px solid var(--scion-border, #e2e8f0);
     }
-
     .notif-list-item:last-child {
       border-bottom: none;
     }
-
     .notif-icon {
       flex-shrink: 0;
       display: flex;
       align-items: flex-start;
       padding-top: 2px;
     }
-
     .notif-icon sl-icon {
       font-size: 1rem;
     }
-
-    .notif-icon.status-success sl-icon { color: var(--scion-success, #22c55e); }
-    .notif-icon.status-warning sl-icon { color: var(--scion-warning, #f59e0b); }
-    .notif-icon.status-danger sl-icon { color: var(--scion-danger, #ef4444); }
-    .notif-icon.status-info sl-icon { color: var(--scion-text-muted, #64748b); }
-
+    .notif-icon.status-success sl-icon {
+      color: var(--scion-success, #22c55e);
+    }
+    .notif-icon.status-warning sl-icon {
+      color: var(--scion-warning, #f59e0b);
+    }
+    .notif-icon.status-danger sl-icon {
+      color: var(--scion-danger, #ef4444);
+    }
+    .notif-icon.status-info sl-icon {
+      color: var(--scion-text-muted, #64748b);
+    }
     .notif-body {
       flex: 1;
       min-width: 0;
     }
-
     .notif-message {
       font-size: 0.8125rem;
       line-height: 1.4;
@@ -384,7 +395,6 @@ export class ScionPageAgentDetail extends LitElement {
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
-
     .notif-truncation-badge {
       display: inline-flex;
       align-items: center;
@@ -400,11 +410,9 @@ export class ScionPageAgentDetail extends LitElement {
       cursor: pointer;
       letter-spacing: 0.05em;
     }
-
     .notif-truncation-badge:hover {
       background: var(--scion-border, #e2e8f0);
     }
-
     .notif-meta {
       display: flex;
       align-items: center;
@@ -413,7 +421,6 @@ export class ScionPageAgentDetail extends LitElement {
       font-size: 0.6875rem;
       color: var(--scion-text-muted, #64748b);
     }
-
     .notif-mark-read {
       border: none;
       background: transparent;
@@ -423,11 +430,9 @@ export class ScionPageAgentDetail extends LitElement {
       padding: 0;
       transition: color 0.15s ease;
     }
-
     .notif-mark-read:hover {
       color: var(--scion-primary, #3b82f6);
     }
-
     .notif-empty {
       display: flex;
       align-items: center;
@@ -436,12 +441,12 @@ export class ScionPageAgentDetail extends LitElement {
       color: var(--scion-text-muted, #64748b);
       font-size: 0.8125rem;
     }
-
     .notif-empty sl-icon {
       font-size: 1.25rem;
       opacity: 0.4;
     }
 
+    /* ---- Loading / Error states ---- */
     .loading-state {
       display: flex;
       flex-direction: column;
@@ -450,12 +455,10 @@ export class ScionPageAgentDetail extends LitElement {
       padding: 4rem 2rem;
       color: var(--scion-text-muted, #64748b);
     }
-
     .loading-state sl-spinner {
       font-size: 2rem;
       margin-bottom: 1rem;
     }
-
     .error-state {
       text-align: center;
       padding: 3rem 2rem;
@@ -463,25 +466,21 @@ export class ScionPageAgentDetail extends LitElement {
       border: 1px solid var(--sl-color-danger-200, #fecaca);
       border-radius: var(--scion-radius-lg, 0.75rem);
     }
-
     .error-state sl-icon {
       font-size: 3rem;
       color: var(--sl-color-danger-500, #ef4444);
       margin-bottom: 1rem;
     }
-
     .error-state h2 {
       font-size: 1.25rem;
       font-weight: 600;
       color: var(--scion-text, #1e293b);
       margin: 0 0 0.5rem 0;
     }
-
     .error-state p {
       color: var(--scion-text-muted, #64748b);
       margin: 0 0 1rem 0;
     }
-
     .error-details {
       font-family: var(--scion-font-mono, monospace);
       font-size: 0.875rem;
@@ -492,41 +491,17 @@ export class ScionPageAgentDetail extends LitElement {
       margin-bottom: 1rem;
     }
 
-    .agent-error-banner {
-      background: var(--sl-color-danger-50, #fef2f2);
-      border: 1px solid var(--sl-color-danger-200, #fecaca);
-      border-radius: var(--scion-radius-lg, 0.75rem);
-      padding: 1rem 1.25rem;
-      margin-bottom: 1.5rem;
-      display: flex;
-      align-items: flex-start;
-      gap: 0.75rem;
-    }
-
-    .agent-error-banner sl-icon {
-      color: var(--sl-color-danger-500, #ef4444);
-      font-size: 1.25rem;
-      flex-shrink: 0;
-      margin-top: 0.125rem;
-    }
-
-    .agent-error-banner .error-content {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .agent-error-banner .error-title {
-      font-weight: 600;
-      color: var(--sl-color-danger-700, #b91c1c);
-      margin-bottom: 0.25rem;
-    }
-
-    .agent-error-banner .error-message {
-      font-size: 0.875rem;
-      color: var(--sl-color-danger-600, #dc2626);
-      font-family: var(--scion-font-mono, monospace);
-      white-space: pre-wrap;
-      word-break: break-word;
+    /* ---- Visibility badge ---- */
+    .visibility-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      background: var(--scion-bg-subtle, #f1f5f9);
+      color: var(--scion-text-muted, #64748b);
     }
   `;
 
@@ -536,8 +511,6 @@ export class ScionPageAgentDetail extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
-    // SSR property bindings (.agentId=) aren't restored during client-side
-    // hydration for top-level page components. Fall back to URL parsing.
     if (!this.agentId && typeof window !== 'undefined') {
       const match = window.location.pathname.match(/\/agents\/([^/]+)/);
       if (match) {
@@ -546,11 +519,9 @@ export class ScionPageAgentDetail extends LitElement {
     }
     void this.loadData();
 
-    // Listen for real-time updates (scope is set after loadData resolves with groveId)
     stateManager.addEventListener('agents-updated', this.boundOnAgentsUpdated as EventListener);
     stateManager.addEventListener('groves-updated', this.boundOnGrovesUpdated as EventListener);
 
-    // Periodically re-render to keep relative timestamps fresh
     this.relativeTimeInterval = setInterval(() => this.requestUpdate(), 15000);
   }
 
@@ -596,7 +567,6 @@ export class ScionPageAgentDetail extends LitElement {
 
       this.agent = (await agentResponse.json()) as Agent;
 
-      // Set SSE scope now that we have the groveId
       if (this.agent.groveId) {
         stateManager.setScope({
           type: 'agent-detail',
@@ -605,7 +575,6 @@ export class ScionPageAgentDetail extends LitElement {
         });
       }
 
-      // Try to load grove info
       if (this.agent.groveId) {
         try {
           const groveResponse = await apiFetch(`/api/v1/groves/${this.agent.groveId}`);
@@ -613,11 +582,10 @@ export class ScionPageAgentDetail extends LitElement {
             this.grove = (await groveResponse.json()) as Grove;
           }
         } catch {
-          // Grove loading is optional, don't fail if it doesn't work
+          // Grove loading is optional
         }
       }
 
-      // Load notifications for this agent
       if (this.pageData?.user) {
         try {
           const notifRes = await apiFetch(`/api/v1/notifications?agentId=${this.agentId}`);
@@ -631,7 +599,6 @@ export class ScionPageAgentDetail extends LitElement {
         }
       }
 
-      // Seed stateManager so SSE delta merging has full baseline data
       stateManager.seedAgents([this.agent]);
       if (this.grove) {
         stateManager.seedGroves([this.grove]);
@@ -720,15 +687,13 @@ export class ScionPageAgentDetail extends LitElement {
           error?: { message?: string };
         };
         throw new Error(
-          errorData.error?.message || errorData.message || `Failed to ${action} agent`,
+          errorData.error?.message || errorData.message || `Failed to ${action} agent`
         );
       }
 
       if (action === 'delete') {
-        // Navigate back to agents list
         window.location.href = '/agents';
       } else {
-        // Reload data to reflect changes
         await this.loadData();
       }
     } catch (err) {
@@ -738,6 +703,10 @@ export class ScionPageAgentDetail extends LitElement {
       this.actionLoading = false;
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   override render() {
     if (this.loading) {
@@ -754,92 +723,7 @@ export class ScionPageAgentDetail extends LitElement {
         ${this.grove ? `To ${this.grove.name}` : 'Back to Agents'}
       </a>
 
-      <div class="header">
-        <div class="header-info">
-          <div class="header-title">
-            <sl-icon name="cpu"></sl-icon>
-            <h1>${this.agent.name}</h1>
-            <scion-status-badge
-              status=${getAgentDisplayStatus(this.agent) as StatusType}
-              label=${getAgentDisplayStatus(this.agent)}
-            ></scion-status-badge>
-          </div>
-          <div class="header-meta">
-            <span class="template-badge">
-              <sl-icon name="code-square"></sl-icon>
-              ${this.agent.template}
-            </span>
-            ${this.grove
-              ? html`
-                  <a href="/groves/${this.grove.id}" class="grove-link">
-                    <sl-icon name="folder"></sl-icon>
-                    ${this.grove.name}
-                  </a>
-                `
-              : ''}
-            ${this.agent.runtimeBrokerId
-              ? html`
-                  <a href="/brokers/${this.agent.runtimeBrokerId}" class="broker-link">
-                    <sl-icon name="hdd-rack"></sl-icon>
-                    ${this.agent.runtimeBrokerName || this.agent.runtimeBrokerId}
-                  </a>
-                `
-              : ''}
-          </div>
-        </div>
-        <div class="header-actions">
-          ${isAgentRunning(this.agent)
-            ? can(this.agent._capabilities, 'stop') ? html`
-                <sl-button
-                  variant="danger"
-                  size="small"
-                  outline
-                  ?loading=${this.actionLoading}
-                  ?disabled=${this.actionLoading}
-                  @click=${() => this.handleAction('stop')}
-                >
-                  <sl-icon slot="prefix" name="stop-circle"></sl-icon>
-                  Stop
-                </sl-button>
-              ` : nothing
-            : can(this.agent._capabilities, 'start') ? html`
-                <sl-button
-                  variant="success"
-                  size="small"
-                  ?loading=${this.actionLoading}
-                  ?disabled=${this.actionLoading}
-                  @click=${() => this.handleAction('start')}
-                >
-                  <sl-icon slot="prefix" name="play-circle"></sl-icon>
-                  Start
-                </sl-button>
-              ` : nothing}
-          ${this.agent.phase === 'created' ? html`
-                <a href="/agents/${this.agentId}/configure" style="text-decoration: none;">
-                  <sl-button
-                    variant="default"
-                    size="small"
-                  >
-                    <sl-icon slot="prefix" name="sliders"></sl-icon>
-                    Configure
-                  </sl-button>
-                </a>
-              ` : nothing}
-          ${can(this.agent._capabilities, 'delete') ? html`
-            <sl-button
-              variant="danger"
-              size="small"
-              ?loading=${this.actionLoading}
-              ?disabled=${this.actionLoading}
-              @click=${() => this.handleAction('delete')}
-            >
-              <sl-icon slot="prefix" name="trash"></sl-icon>
-              Delete
-            </sl-button>
-          ` : nothing}
-        </div>
-      </div>
-
+      ${this.renderHeader()}
       ${this.agent.phase === 'error' && (this.agent.detail?.message || this.agent.message)
         ? html`
             <div class="agent-error-banner">
@@ -852,96 +736,153 @@ export class ScionPageAgentDetail extends LitElement {
           `
         : ''}
 
-      <!-- Quick Actions -->
-      <div class="quick-actions" style="margin-bottom: 1.5rem;">
-        ${can(this.agent._capabilities, 'attach') ? html`
-          <a
-            class="quick-action"
-            href="/agents/${this.agentId}/terminal"
-            ?disabled=${!isTerminalAvailable(this.agent)}
-          >
-            <sl-icon name="terminal"></sl-icon>
-            <span>Open Terminal</span>
-          </a>
-        ` : nothing}
-        <div class="quick-action" disabled>
-          <sl-icon name="file-text"></sl-icon>
-          <span>View Logs</span>
+      <sl-tab-group>
+        <sl-tab slot="nav" panel="status">Status</sl-tab>
+        <sl-tab slot="nav" panel="configuration">Configuration</sl-tab>
+
+        <sl-tab-panel name="status">${this.renderStatusTab()}</sl-tab-panel>
+        <sl-tab-panel name="configuration">${this.renderConfigurationTab()}</sl-tab-panel>
+      </sl-tab-group>
+    `;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Header
+  // ---------------------------------------------------------------------------
+
+  private renderHeader() {
+    const agent = this.agent!;
+    return html`
+      <div class="header">
+        <div class="header-info">
+          <div class="header-title">
+            <sl-icon name="cpu"></sl-icon>
+            <h1>${agent.name}</h1>
+            <scion-status-badge
+              status=${getAgentDisplayStatus(agent) as StatusType}
+              label=${getAgentDisplayStatus(agent)}
+            ></scion-status-badge>
+          </div>
+          <div class="header-meta">
+            <span class="template-badge">
+              <sl-icon name="code-square"></sl-icon>
+              ${agent.template}
+            </span>
+            ${this.grove
+              ? html`
+                  <a href="/groves/${this.grove.id}" class="grove-link">
+                    <sl-icon name="folder"></sl-icon>
+                    ${this.grove.name}
+                  </a>
+                `
+              : ''}
+            ${agent.runtimeBrokerId
+              ? html`
+                  <a href="/brokers/${agent.runtimeBrokerId}" class="broker-link">
+                    <sl-icon name="hdd-rack"></sl-icon>
+                    ${agent.runtimeBrokerName || agent.runtimeBrokerId}
+                  </a>
+                `
+              : ''}
+          </div>
         </div>
-        <div class="quick-action" disabled>
-          <sl-icon name="gear"></sl-icon>
-          <span>Settings</span>
+        <div class="header-actions">
+          ${can(agent._capabilities, 'attach')
+            ? html`
+                <a href="/agents/${this.agentId}/terminal" style="text-decoration: none;">
+                  <sl-button
+                    variant="default"
+                    size="small"
+                    ?disabled=${!isTerminalAvailable(agent)}
+                  >
+                    <sl-icon slot="prefix" name="terminal"></sl-icon>
+                    Terminal
+                  </sl-button>
+                </a>
+              `
+            : nothing}
+          ${isAgentRunning(agent)
+            ? can(agent._capabilities, 'stop')
+              ? html`
+                  <sl-button
+                    variant="danger"
+                    size="small"
+                    outline
+                    ?loading=${this.actionLoading}
+                    ?disabled=${this.actionLoading}
+                    @click=${() => this.handleAction('stop')}
+                  >
+                    <sl-icon slot="prefix" name="stop-circle"></sl-icon>
+                    Stop
+                  </sl-button>
+                `
+              : nothing
+            : can(agent._capabilities, 'start')
+              ? html`
+                  <sl-button
+                    variant="success"
+                    size="small"
+                    ?loading=${this.actionLoading}
+                    ?disabled=${this.actionLoading}
+                    @click=${() => this.handleAction('start')}
+                  >
+                    <sl-icon slot="prefix" name="play-circle"></sl-icon>
+                    Start
+                  </sl-button>
+                `
+              : nothing}
+          ${agent.phase === 'created'
+            ? html`
+                <a href="/agents/${this.agentId}/configure" style="text-decoration: none;">
+                  <sl-button variant="default" size="small">
+                    <sl-icon slot="prefix" name="sliders"></sl-icon>
+                    Configure
+                  </sl-button>
+                </a>
+              `
+            : nothing}
+          ${can(agent._capabilities, 'delete')
+            ? html`
+                <sl-button
+                  variant="danger"
+                  size="small"
+                  ?loading=${this.actionLoading}
+                  ?disabled=${this.actionLoading}
+                  @click=${() => this.handleAction('delete')}
+                >
+                  <sl-icon slot="prefix" name="trash"></sl-icon>
+                </sl-button>
+              `
+            : nothing}
         </div>
       </div>
+    `;
+  }
 
-      <!-- Agent Info -->
+  // ---------------------------------------------------------------------------
+  // Status Tab
+  // ---------------------------------------------------------------------------
+
+  private renderStatusTab() {
+    const agent = this.agent!;
+    return html`
+      ${this.renderCurrentStateCard(agent)} ${this.renderCurrentTaskCard(agent)}
+      ${this.renderLimitsUsageCard(agent)} ${this.renderConnectivityCard(agent)}
+      ${this.renderNotificationsCard()}
+    `;
+  }
+
+  private renderCurrentStateCard(agent: Agent) {
+    return html`
       <div class="card">
-        <h3 class="card-title">Agent Information</h3>
-        <div class="info-grid">
-          <div class="info-item">
-            <span class="info-label">Agent ID</span>
-            <span class="info-value mono">${this.agent.id}</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">Template</span>
-            <span class="info-value">${this.agent.template}</span>
-          </div>
-          ${this.agent.harnessConfig
-            ? html`
-                <div class="info-item">
-                  <span class="info-label">Harness</span>
-                  <span class="info-value">${this.agent.harnessConfig}</span>
-                </div>
-              `
-            : ''}
-          ${this.agent.harnessAuth
-            ? html`
-                <div class="info-item">
-                  <span class="info-label">Harness Auth</span>
-                  <span class="info-value">${this.agent.harnessAuth}</span>
-                </div>
-              `
-            : ''}
-          <div class="info-item">
-            <span class="info-label">Grove</span>
-            <span class="info-value">${this.grove?.name || this.agent.groveId}</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">Created</span>
-            <span class="info-value">${this.formatDate(this.agent.createdAt)}</span>
-          </div>
-          <div class="info-item">
-            <span class="info-label">Last Seen</span>
-            <span class="info-value"
-              >${this.agent.lastSeen
-                ? this.formatRelativeTime(this.agent.lastSeen)
-                : this.formatRelativeTime(this.agent.updatedAt)}</span
-            >
-          </div>
-        </div>
-
-        ${this.agent.detail?.taskSummary || this.agent.taskSummary
-          ? html`
-              <h4
-                style="margin-top: 1.5rem; margin-bottom: 0.5rem; font-size: 0.875rem; font-weight: 600;"
-              >
-                Current Task
-              </h4>
-              <div class="task-summary">${this.agent.detail?.taskSummary || this.agent.taskSummary}</div>
-            `
-          : ''}
-      </div>
-
-      <!-- Status -->
-      <div class="card">
-        <h3 class="card-title">Status</h3>
+        <h3 class="card-title">Current State</h3>
         <div class="info-grid">
           <div class="info-item">
             <span class="info-label">Phase</span>
             <span class="info-value">
               <scion-status-badge
-                status=${this.agent.phase as StatusType}
-                label=${this.agent.phase}
+                status=${agent.phase as StatusType}
+                label=${agent.phase}
                 size="small"
               ></scion-status-badge>
             </span>
@@ -949,35 +890,344 @@ export class ScionPageAgentDetail extends LitElement {
           <div class="info-item">
             <span class="info-label">Activity</span>
             <span class="info-value">
-              ${this.agent.activity
+              ${agent.activity
                 ? html`<scion-status-badge
-                    status=${this.agent.activity as StatusType}
-                    label=${this.agent.activity}
+                    status=${agent.activity as StatusType}
+                    label=${agent.activity}
                     size="small"
                   ></scion-status-badge>`
                 : html`<span style="color: var(--scion-text-muted, #64748b);">—</span>`}
             </span>
           </div>
-          ${this.agent.detail?.toolName
+          ${agent.detail?.toolName
             ? html`
                 <div class="info-item">
                   <span class="info-label">Tool</span>
-                  <span class="info-value mono">${this.agent.detail.toolName}</span>
+                  <span class="info-value mono">${agent.detail.toolName}</span>
                 </div>
               `
             : ''}
-          ${this.agent.detail?.message && this.agent.phase !== 'error'
+          ${agent.detail?.message && agent.phase !== 'error'
             ? html`
                 <div class="info-item">
                   <span class="info-label">Detail</span>
-                  <span class="info-value">${this.agent.detail.message}</span>
+                  <span class="info-value">${agent.detail.message}</span>
                 </div>
               `
             : ''}
         </div>
       </div>
+    `;
+  }
 
-      ${this.renderNotificationsCard()}
+  private renderCurrentTaskCard(agent: Agent) {
+    const task = agent.detail?.taskSummary || agent.taskSummary;
+    if (!task) return nothing;
+    return html`
+      <div class="card">
+        <h3 class="card-title">Current Task</h3>
+        <div class="task-summary">${task}</div>
+      </div>
+    `;
+  }
+
+  private renderLimitsUsageCard(agent: Agent) {
+    const cfg = agent.appliedConfig?.inlineConfig;
+    const maxTurns = cfg?.max_turns ?? 0;
+    const maxModelCalls = cfg?.max_model_calls ?? 0;
+    const maxDurationStr = cfg?.max_duration ?? '';
+    const maxDurationSec = parseDuration(maxDurationStr);
+
+    if (!maxTurns && !maxModelCalls && !maxDurationSec) return nothing;
+
+    const currentTurns = agent.currentTurns ?? 0;
+    const currentModelCalls = agent.currentModelCalls ?? 0;
+
+    let timeRemainingSec = 0;
+    let elapsedSec = 0;
+    if (maxDurationSec > 0 && agent.startedAt) {
+      elapsedSec = (Date.now() - new Date(agent.startedAt).getTime()) / 1000;
+      timeRemainingSec = Math.max(0, maxDurationSec - elapsedSec);
+    }
+
+    return html`
+      <div class="card">
+        <h3 class="card-title">Limits & Usage</h3>
+        <div class="limits-grid">
+          ${maxTurns > 0 ? this.renderLimitItem('Turns', currentTurns, maxTurns) : nothing}
+          ${maxModelCalls > 0
+            ? this.renderLimitItem('Model Calls', currentModelCalls, maxModelCalls)
+            : nothing}
+          ${maxDurationSec > 0
+            ? this.renderTimeLimitItem(timeRemainingSec, elapsedSec, maxDurationSec)
+            : nothing}
+        </div>
+      </div>
+    `;
+  }
+
+  private renderLimitItem(label: string, current: number, max: number) {
+    const pct = Math.min(100, (current / max) * 100);
+    const colorClass = pct > 90 ? 'danger' : pct > 75 ? 'warning' : 'normal';
+    return html`
+      <div class="limit-item">
+        <span class="limit-label">${label}</span>
+        <span class="limit-value">${current} / ${max}</span>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill ${colorClass}" style="width: ${pct}%"></div>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderTimeLimitItem(remainingSec: number, elapsedSec: number, totalSec: number) {
+    const pct = Math.min(100, (elapsedSec / totalSec) * 100);
+    const remainPct = 100 - pct;
+    const colorClass = remainPct < 10 ? 'danger' : remainPct < 25 ? 'warning' : 'normal';
+    return html`
+      <div class="limit-item">
+        <span class="limit-label">Time Remaining</span>
+        <span class="limit-value">${formatDurationHMS(remainingSec)}</span>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill ${colorClass}" style="width: ${pct}%"></div>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderConnectivityCard(agent: Agent) {
+    const lastSeenStr = agent.lastSeen || agent.updatedAt;
+    return html`
+      <div class="card">
+        <h3 class="card-title">Connectivity</h3>
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-label">Last Seen</span>
+            <span class="info-value" title="${this.formatDate(lastSeenStr)}">
+              ${this.formatRelativeTime(lastSeenStr)}
+            </span>
+          </div>
+          ${agent.connectionState
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">Connection State</span>
+                  <span class="info-value">
+                    <scion-status-badge
+                      status=${agent.connectionState === 'connected'
+                        ? ('success' as StatusType)
+                        : ('danger' as StatusType)}
+                      label=${agent.connectionState}
+                      size="small"
+                    ></scion-status-badge>
+                  </span>
+                </div>
+              `
+            : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Configuration Tab
+  // ---------------------------------------------------------------------------
+
+  private renderConfigurationTab() {
+    const agent = this.agent!;
+    const cfg = agent.appliedConfig;
+    const inline = cfg?.inlineConfig;
+
+    return html`
+      ${this.renderIdentityCard(agent)} ${this.renderHarnessModelCard(agent, cfg, inline)}
+      ${this.renderRuntimeCard(agent, inline)} ${this.renderConfigLimitsCard(inline)}
+      ${this.renderInitialTaskCard(cfg)}
+    `;
+  }
+
+  private renderIdentityCard(agent: Agent) {
+    return html`
+      <div class="card">
+        <h3 class="card-title">Identity</h3>
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-label">Agent ID</span>
+            <span class="info-value mono">${agent.id}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Name</span>
+            <span class="info-value">${agent.name}</span>
+          </div>
+          ${agent.slug
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">Slug</span>
+                  <span class="info-value mono">${agent.slug}</span>
+                </div>
+              `
+            : ''}
+          <div class="info-item">
+            <span class="info-label">Created</span>
+            <span class="info-value">${this.formatDate(agent.createdAt)}</span>
+          </div>
+          ${agent.appliedConfig?.creatorName
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">Created By</span>
+                  <span class="info-value">${agent.appliedConfig.creatorName}</span>
+                </div>
+              `
+            : ''}
+          ${agent.visibility
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">Visibility</span>
+                  <span class="info-value">
+                    <span class="visibility-badge">${agent.visibility}</span>
+                  </span>
+                </div>
+              `
+            : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  private renderHarnessModelCard(
+    agent: Agent,
+    cfg: AgentAppliedConfig | undefined,
+    inline: AgentInlineConfig | undefined
+  ) {
+    const harness = agent.harnessConfig || cfg?.harnessConfig;
+    const auth = agent.harnessAuth || cfg?.harnessAuth;
+    const model = inline?.model || cfg?.model;
+
+    return html`
+      <div class="card">
+        <h3 class="card-title">Harness & Model</h3>
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-label">Template</span>
+            <span class="info-value">${agent.template}</span>
+          </div>
+          ${harness
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">Harness</span>
+                  <span class="info-value">${harness}</span>
+                </div>
+              `
+            : ''}
+          ${auth
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">Auth Method</span>
+                  <span class="info-value">${auth}</span>
+                </div>
+              `
+            : ''}
+          ${model
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">Model</span>
+                  <span class="info-value mono">${model}</span>
+                </div>
+              `
+            : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  private renderRuntimeCard(agent: Agent, inline: AgentInlineConfig | undefined) {
+    const image = agent.image || inline?.image || agent.appliedConfig?.image;
+    const branch = inline?.branch;
+
+    return html`
+      <div class="card">
+        <h3 class="card-title">Runtime Environment</h3>
+        <div class="info-grid">
+          ${agent.runtimeBrokerId
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">Runtime Broker</span>
+                  <span class="info-value">
+                    <a
+                      href="/brokers/${agent.runtimeBrokerId}"
+                      class="broker-link"
+                      style="font-size: 1rem;"
+                    >
+                      ${agent.runtimeBrokerName || agent.runtimeBrokerId}
+                    </a>
+                  </span>
+                </div>
+              `
+            : ''}
+          ${agent.runtime
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">Runtime Type</span>
+                  <span class="info-value">${agent.runtime}</span>
+                </div>
+              `
+            : ''}
+          ${image
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">Image</span>
+                  <span class="info-value mono">${image}</span>
+                </div>
+              `
+            : ''}
+          ${branch
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">Branch</span>
+                  <span class="info-value mono">${branch}</span>
+                </div>
+              `
+            : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  private renderConfigLimitsCard(inline: AgentInlineConfig | undefined) {
+    const maxTurns = inline?.max_turns ?? 0;
+    const maxModelCalls = inline?.max_model_calls ?? 0;
+    const maxDuration = inline?.max_duration ?? '';
+
+    if (!maxTurns && !maxModelCalls && !maxDuration) return nothing;
+
+    return html`
+      <div class="card">
+        <h3 class="card-title">Limits</h3>
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-label">Max Turns</span>
+            <span class="info-value">${maxTurns || 'None'}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Max Model Calls</span>
+            <span class="info-value">${maxModelCalls || 'None'}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Max Duration</span>
+            <span class="info-value">${maxDuration || 'None'}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderInitialTaskCard(cfg: AgentAppliedConfig | undefined) {
+    const task = cfg?.task;
+    if (!task) return nothing;
+
+    return html`
+      <div class="card">
+        <h3 class="card-title">Initial Task</h3>
+        <div class="task-summary">${task}</div>
+      </div>
     `;
   }
 
@@ -1000,13 +1250,17 @@ export class ScionPageAgentDetail extends LitElement {
           : html`
               ${hasUser
                 ? html`
-                    ${hasAgent ? html`<div class="notif-section-title">Your Notifications</div>` : nothing}
+                    ${hasAgent
+                      ? html`<div class="notif-section-title">Your Notifications</div>`
+                      : nothing}
                     ${this.userNotifications.map((n) => this.renderNotifItem(n, true))}
                   `
                 : nothing}
               ${hasAgent
                 ? html`
-                    ${hasUser ? html`<div class="notif-section-title">Agent Notifications</div>` : nothing}
+                    ${hasUser
+                      ? html`<div class="notif-section-title">Agent Notifications</div>`
+                      : nothing}
                     ${this.agentNotifications.map((n) => this.renderNotifItem(n, false))}
                   `
                 : nothing}
@@ -1029,7 +1283,9 @@ export class ScionPageAgentDetail extends LitElement {
           <div class="notif-meta">
             <span>${this.formatRelativeTime(n.createdAt)}</span>
             ${canAck && !n.acknowledged
-              ? html`<button class="notif-mark-read" @click=${() => this.ackNotification(n.id)}>Mark read</button>`
+              ? html`<button class="notif-mark-read" @click=${() => this.ackNotification(n.id)}>
+                  Mark read
+                </button>`
               : nothing}
           </div>
         </div>
@@ -1039,19 +1295,27 @@ export class ScionPageAgentDetail extends LitElement {
 
   private notifStatusIcon(status: string): string {
     switch (status) {
-      case 'COMPLETED': return 'check-circle-fill';
-      case 'WAITING_FOR_INPUT': return 'exclamation-circle-fill';
-      case 'LIMITS_EXCEEDED': return 'x-circle-fill';
-      default: return 'info-circle-fill';
+      case 'COMPLETED':
+        return 'check-circle-fill';
+      case 'WAITING_FOR_INPUT':
+        return 'exclamation-circle-fill';
+      case 'LIMITS_EXCEEDED':
+        return 'x-circle-fill';
+      default:
+        return 'info-circle-fill';
     }
   }
 
   private notifStatusClass(status: string): string {
     switch (status) {
-      case 'COMPLETED': return 'status-success';
-      case 'WAITING_FOR_INPUT': return 'status-warning';
-      case 'LIMITS_EXCEEDED': return 'status-danger';
-      default: return 'status-info';
+      case 'COMPLETED':
+        return 'status-success';
+      case 'WAITING_FOR_INPUT':
+        return 'status-warning';
+      case 'LIMITS_EXCEEDED':
+        return 'status-danger';
+      default:
+        return 'status-info';
     }
   }
 
@@ -1073,11 +1337,17 @@ export class ScionPageAgentDetail extends LitElement {
     const messages = this.shadowRoot?.querySelectorAll('.notif-message');
     if (!messages) return;
     messages.forEach((el) => {
-      const badge = el.parentElement?.querySelector('.notif-truncation-badge') as HTMLElement | null;
+      const badge = el.parentElement?.querySelector(
+        '.notif-truncation-badge'
+      ) as HTMLElement | null;
       if (!badge) return;
       badge.style.display = el.scrollHeight > el.clientHeight ? 'inline-flex' : 'none';
     });
   }
+
+  // ---------------------------------------------------------------------------
+  // Loading / Error states
+  // ---------------------------------------------------------------------------
 
   private renderLoading() {
     return html`
