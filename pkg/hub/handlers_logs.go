@@ -23,9 +23,6 @@ import (
 	"strconv"
 	"time"
 
-	"cloud.google.com/go/logging/logadmin"
-	"google.golang.org/api/iterator"
-
 	"github.com/ptone/scion-agent/pkg/store"
 )
 
@@ -91,6 +88,9 @@ func (s *Server) handleAgentCloudLogs(w http.ResponseWriter, r *http.Request, ag
 	if v := query.Get("severity"); v != "" {
 		opts.Severity = v
 	}
+	if v := query.Get("broker_id"); v != "" {
+		opts.BrokerID = v
+	}
 
 	result, err := s.logQueryService.Query(ctx, opts)
 	if err != nil {
@@ -105,7 +105,7 @@ func (s *Server) handleAgentCloudLogs(w http.ResponseWriter, r *http.Request, ag
 
 // handleAgentCloudLogsStream handles GET /api/v1/agents/{id}/cloud-logs/stream
 // and GET /api/v1/groves/{groveId}/agents/{agentId}/cloud-logs/stream
-// It returns an SSE stream of log entries via a server-side polling loop.
+// It returns an SSE stream of log entries using the Cloud Logging Tail API.
 func (s *Server) handleAgentCloudLogsStream(w http.ResponseWriter, r *http.Request, agentID string) {
 	if r.Method != http.MethodGet {
 		MethodNotAllowed(w)
@@ -141,8 +141,17 @@ func (s *Server) handleAgentCloudLogsStream(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Parse severity filter
-	severity := r.URL.Query().Get("severity")
+	// Parse query filters
+	query := r.URL.Query()
+	opts := LogQueryOptions{
+		AgentID: agent.ID,
+	}
+	if v := query.Get("severity"); v != "" {
+		opts.Severity = v
+	}
+	if v := query.Get("broker_id"); v != "" {
+		opts.BrokerID = v
+	}
 
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -151,12 +160,18 @@ func (s *Server) handleAgentCloudLogsStream(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("X-Accel-Buffering", "no")
 	flusher.Flush()
 
-	// Start polling loop: query every 3 seconds with a sliding cursor
-	cursor := time.Now().Add(-1 * time.Second)
+	// Open a Tail stream via the Cloud Logging Tail API
+	tailCh, tailCancel, err := s.logQueryService.Tail(ctx, opts)
+	if err != nil {
+		slog.Error("failed to open tail stream", "agentID", agentID, "error", err)
+		fmt.Fprintf(w, "event: error\ndata: {\"message\":\"failed to open log stream\"}\n\n")
+		flusher.Flush()
+		return
+	}
+	defer tailCancel()
+
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
-	pollTicker := time.NewTicker(3 * time.Second)
-	defer pollTicker.Stop()
 
 	// Server-side timeout: 10 minutes
 	timeout := time.NewTimer(10 * time.Minute)
@@ -164,23 +179,17 @@ func (s *Server) handleAgentCloudLogsStream(w http.ResponseWriter, r *http.Reque
 
 	for {
 		select {
-		case <-pollTicker.C:
-			entries, err := s.pollCloudLogs(ctx, agent.ID, cursor, severity)
+		case entry, ok := <-tailCh:
+			if !ok {
+				// Tail stream closed
+				return
+			}
+			data, err := json.Marshal(entry)
 			if err != nil {
-				slog.Error("cloud log stream poll failed", "agentID", agentID, "error", err)
 				continue
 			}
-			for _, entry := range entries {
-				data, err := json.Marshal(entry)
-				if err != nil {
-					continue
-				}
-				fmt.Fprintf(w, "event: log\ndata: %s\n\n", data)
-				flusher.Flush()
-				if entry.Timestamp.After(cursor) {
-					cursor = entry.Timestamp
-				}
-			}
+			fmt.Fprintf(w, "event: log\ndata: %s\n\n", data)
+			flusher.Flush()
 		case <-heartbeat.C:
 			fmt.Fprintf(w, ":heartbeat %d\n\n", time.Now().UnixMilli())
 			flusher.Flush()
@@ -192,42 +201,6 @@ func (s *Server) handleAgentCloudLogsStream(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-}
-
-// pollCloudLogs queries for new log entries since the cursor timestamp.
-func (s *Server) pollCloudLogs(ctx context.Context, agentID string, since time.Time, severity string) ([]CloudLogEntry, error) {
-	opts := LogQueryOptions{
-		AgentID:  agentID,
-		Since:    since.Add(time.Nanosecond), // Exclusive: skip the cursor entry itself
-		Tail:     100,
-		Severity: severity,
-	}
-
-	filter := BuildLogFilter(opts)
-
-	it := s.logQueryService.client.Entries(ctx,
-		logadmin.Filter(filter),
-		logadmin.NewestFirst(),
-	)
-
-	var entries []CloudLogEntry
-	for len(entries) < 100 {
-		entry, err := it.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		entries = append(entries, ConvertLogEntry(entry))
-	}
-
-	// Reverse to chronological order for streaming
-	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
-		entries[i], entries[j] = entries[j], entries[i]
-	}
-
-	return entries, nil
 }
 
 // resolveGroveAgent resolves an agent by slug or ID within a grove, returning

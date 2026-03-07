@@ -1399,6 +1399,10 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			}
 		}
 
+		// Enrich the default logger with broker_id so all logs from this
+		// broker include the label (promoted to Cloud Logging labels by CloudHandler).
+		slog.SetDefault(slog.Default().With(slog.String(logging.AttrBrokerID, brokerID)))
+
 		// Get hub endpoint for the co-located runtime broker.
 		// When hub and web are both enabled, the Hub API is mounted on the
 		// web server's mux, so the broker MUST use webPort regardless of

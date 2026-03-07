@@ -54,6 +54,7 @@ type RequestMeta struct {
 	mu        sync.Mutex
 	GroveID   string
 	AgentID   string
+	BrokerID  string
 	RequestID string
 	TraceID   string
 	Component string
@@ -135,6 +136,15 @@ func SetRequestAgentID(ctx context.Context, agentID string) {
 	if meta := RequestMetaFromContext(ctx); meta != nil {
 		meta.mu.Lock()
 		meta.AgentID = agentID
+		meta.mu.Unlock()
+	}
+}
+
+// SetRequestBrokerID sets the broker ID on the request metadata in context.
+func SetRequestBrokerID(ctx context.Context, brokerID string) {
+	if meta := RequestMetaFromContext(ctx); meta != nil {
+		meta.mu.Lock()
+		meta.BrokerID = brokerID
 		meta.mu.Unlock()
 	}
 }
@@ -299,6 +309,7 @@ func RequestLogMiddleware(logger *slog.Logger, component string, patterns []Path
 			meta.mu.Lock()
 			finalGroveID := meta.GroveID
 			finalAgentID := meta.AgentID
+			finalBrokerID := meta.BrokerID
 			meta.mu.Unlock()
 
 			duration := time.Since(start)
@@ -342,6 +353,7 @@ func RequestLogMiddleware(logger *slog.Logger, component string, patterns []Path
 				slog.String(AttrComponent, component),
 				slog.String(AttrGroveID, finalGroveID),
 				slog.String(AttrAgentID, finalAgentID),
+				slog.String(AttrBrokerID, finalBrokerID),
 				slog.String(AttrRequestID, requestID),
 			}
 

@@ -342,6 +342,14 @@ func TestPromoteAttrToLabels(t *testing.T) {
 		}
 	})
 
+	t.Run("broker_id promoted", func(t *testing.T) {
+		labels := map[string]string{}
+		promoteAttrToLabels(labels, slog.String(AttrBrokerID, "broker-west-1"))
+		if labels[AttrBrokerID] != "broker-west-1" {
+			t.Errorf("expected broker_id=broker-west-1, got %v", labels[AttrBrokerID])
+		}
+	})
+
 	t.Run("unrelated attrs ignored", func(t *testing.T) {
 		labels := map[string]string{}
 		promoteAttrToLabels(labels, slog.String("other_key", "value"))

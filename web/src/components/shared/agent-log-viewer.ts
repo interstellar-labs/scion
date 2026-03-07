@@ -51,6 +51,10 @@ export class ScionAgentLogViewer extends LitElement {
   @property()
   agentId = '';
 
+  /** Available brokers for filtering (id -> name). */
+  @property({ type: Object })
+  brokers: Record<string, string> = {};
+
   @state() private entries: CloudLogEntry[] = [];
   @state() private entryMap = new Map<string, CloudLogEntry>();
   @state() private loading = false;
@@ -58,6 +62,7 @@ export class ScionAgentLogViewer extends LitElement {
   @state() private streaming = false;
   @state() private expandedIds = new Set<string>();
   @state() private loaded = false;
+  @state() private selectedBrokerId = '';
 
   private eventSource: EventSource | null = null;
 
@@ -218,11 +223,14 @@ export class ScionAgentLogViewer extends LitElement {
 
     try {
       // If we have entries, fetch only newer ones
-      let url = `/api/v1/agents/${this.agentId}/cloud-logs?tail=200`;
+      const params = new URLSearchParams({ tail: '200' });
       if (this.entries.length > 0) {
-        const newest = this.entries[0].timestamp;
-        url = `/api/v1/agents/${this.agentId}/cloud-logs?since=${encodeURIComponent(newest)}&tail=200`;
+        params.set('since', this.entries[0].timestamp);
       }
+      if (this.selectedBrokerId) {
+        params.set('broker_id', this.selectedBrokerId);
+      }
+      const url = `/api/v1/agents/${this.agentId}/cloud-logs?${params.toString()}`;
 
       const res = await apiFetch(url);
       if (!res.ok) {
@@ -246,6 +254,11 @@ export class ScionAgentLogViewer extends LitElement {
       if (!this.entryMap.has(entry.insertId)) {
         this.entryMap.set(entry.insertId, entry);
       }
+      // Auto-discover broker IDs from log entry labels
+      const brokerId = entry.labels?.['broker_id'];
+      if (brokerId && !this.brokers[brokerId]) {
+        this.brokers = { ...this.brokers, [brokerId]: brokerId };
+      }
     }
 
     // Sort descending by timestamp (newest first)
@@ -268,7 +281,12 @@ export class ScionAgentLogViewer extends LitElement {
     if (this.eventSource) return;
     this.streaming = true;
 
-    const url = `/api/v1/agents/${this.agentId}/cloud-logs/stream`;
+    const params = new URLSearchParams();
+    if (this.selectedBrokerId) {
+      params.set('broker_id', this.selectedBrokerId);
+    }
+    const qs = params.toString();
+    const url = `/api/v1/agents/${this.agentId}/cloud-logs/stream${qs ? '?' + qs : ''}`;
     this.eventSource = new EventSource(url);
 
     this.eventSource.addEventListener('log', (event: Event) => {
@@ -317,6 +335,19 @@ export class ScionAgentLogViewer extends LitElement {
     }
   }
 
+  private handleBrokerFilter(e: Event): void {
+    this.selectedBrokerId = (e.target as HTMLSelectElement).value;
+    // Clear existing entries and re-fetch with the new filter
+    this.entryMap.clear();
+    this.entries = [];
+    if (this.streaming) {
+      this.stopStream();
+      this.startStream();
+    } else {
+      void this.fetchLogs();
+    }
+  }
+
   private handleRefresh(): void {
     void this.fetchLogs();
   }
@@ -333,8 +364,26 @@ export class ScionAgentLogViewer extends LitElement {
   }
 
   private renderToolbar() {
+    const brokerEntries = Object.entries(this.brokers);
     return html`
       <div class="toolbar">
+        ${brokerEntries.length > 0
+          ? html`
+              <sl-select
+                size="small"
+                placeholder="All brokers"
+                clearable
+                value=${this.selectedBrokerId}
+                @sl-change=${this.handleBrokerFilter}
+                style="min-width: 10rem"
+              >
+                ${brokerEntries.map(
+                  ([id, name]) =>
+                    html`<sl-option value=${id}>${name || id}</sl-option>`
+                )}
+              </sl-select>
+            `
+          : nothing}
         ${this.streaming
           ? html`<span class="stream-indicator"><span class="stream-dot"></span>Streaming</span>`
           : nothing}

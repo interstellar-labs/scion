@@ -455,6 +455,7 @@ type GetCloudLogsOptions struct {
 	Since    string
 	Until    string
 	Severity string
+	BrokerID string
 }
 
 // CloudLogsResponse is the response from querying cloud logs.
@@ -499,6 +500,9 @@ func (s *agentService) GetCloudLogs(ctx context.Context, agentID string, opts *G
 		if opts.Severity != "" {
 			query.Set("severity", opts.Severity)
 		}
+		if opts.BrokerID != "" {
+			query.Set("broker_id", opts.BrokerID)
+		}
 	}
 
 	resp, err := s.c.transport.GetWithQuery(ctx, s.agentPath(agentID)+"/cloud-logs", query, nil)
@@ -515,6 +519,9 @@ func (s *agentService) StreamCloudLogs(ctx context.Context, agentID string, opts
 	if opts != nil {
 		if opts.Severity != "" {
 			query.Set("severity", opts.Severity)
+		}
+		if opts.BrokerID != "" {
+			query.Set("broker_id", opts.BrokerID)
 		}
 	}
 

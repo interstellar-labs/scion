@@ -27,6 +27,7 @@ const (
 	AttrTraceID    = "trace_id"
 	AttrGroveID    = "grove_id"
 	AttrAgentID    = "agent_id"
+	AttrBrokerID   = "broker_id"
 	AttrRequestID  = "request_id"
 	AttrUserID     = "user_id"
 )
@@ -88,6 +89,9 @@ func Logger(ctx context.Context) *slog.Logger {
 		}
 		if meta.AgentID != "" {
 			attrs = append(attrs, slog.String(AttrAgentID, meta.AgentID))
+		}
+		if meta.BrokerID != "" {
+			attrs = append(attrs, slog.String(AttrBrokerID, meta.BrokerID))
 		}
 		meta.mu.Unlock()
 		if len(attrs) > 0 {

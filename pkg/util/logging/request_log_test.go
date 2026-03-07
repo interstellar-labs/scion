@@ -156,11 +156,23 @@ func TestSetRequestGroveID_AgentID(t *testing.T) {
 	}
 }
 
+func TestSetRequestBrokerID(t *testing.T) {
+	meta := &RequestMeta{}
+	ctx := ContextWithRequestMeta(context.Background(), meta)
+
+	SetRequestBrokerID(ctx, "broker-west-1")
+
+	if meta.BrokerID != "broker-west-1" {
+		t.Errorf("expected BrokerID=broker-west-1, got %s", meta.BrokerID)
+	}
+}
+
 func TestSetRequestGroveID_NilContext(t *testing.T) {
 	// Should not panic when no meta in context
 	ctx := context.Background()
 	SetRequestGroveID(ctx, "test")
 	SetRequestAgentID(ctx, "test")
+	SetRequestBrokerID(ctx, "test")
 }
 
 func TestExtractIDsFromPath(t *testing.T) {

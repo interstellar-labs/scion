@@ -757,7 +757,12 @@ export class ScionPageAgentDetail extends LitElement {
         ${this.agent.cloudLogging
           ? html`
               <sl-tab-panel name="logs">
-                <scion-agent-log-viewer agentId=${this.agentId}></scion-agent-log-viewer>
+                <scion-agent-log-viewer
+                  agentId=${this.agentId}
+                  .brokers=${this.agent.runtimeBrokerId
+                    ? { [this.agent.runtimeBrokerId]: this.agent.runtimeBrokerName || this.agent.runtimeBrokerId }
+                    : {}}
+                ></scion-agent-log-viewer>
               </sl-tab-panel>
             `
           : nothing}

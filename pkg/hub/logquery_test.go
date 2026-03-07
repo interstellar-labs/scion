@@ -19,8 +19,12 @@ import (
 	"time"
 
 	gcplog "cloud.google.com/go/logging"
+	loggingpb "cloud.google.com/go/logging/apiv2/loggingpb"
 	mrpb "google.golang.org/genproto/googleapis/api/monitoredres"
 	logpb "google.golang.org/genproto/googleapis/logging/v2"
+	ltype "google.golang.org/genproto/googleapis/logging/type"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestBuildLogFilter(t *testing.T) {
@@ -65,6 +69,24 @@ func TestBuildLogFilter(t *testing.T) {
 				Severity: "warning",
 			},
 			expected: `severity >= WARNING`,
+		},
+		{
+			name: "broker ID filter",
+			opts: LogQueryOptions{
+				AgentID:  "agent-123",
+				BrokerID: "broker-west-1",
+			},
+			expected: `labels.agent_id = "agent-123" AND labels.broker_id = "broker-west-1"`,
+		},
+		{
+			name: "all filters with broker",
+			opts: LogQueryOptions{
+				AgentID:  "agent-123",
+				BrokerID: "broker-east-1",
+				Since:    time.Date(2026, 3, 7, 10, 0, 0, 0, time.UTC),
+				Severity: "ERROR",
+			},
+			expected: `labels.agent_id = "agent-123" AND labels.broker_id = "broker-east-1" AND timestamp >= "2026-03-07T10:00:00Z" AND severity >= ERROR`,
 		},
 	}
 
@@ -204,5 +226,96 @@ func TestLogQueryOptionsTailCapping(t *testing.T) {
 	// Tail should not appear in the filter string
 	if filter != `labels.agent_id = "test"` {
 		t.Errorf("BuildLogFilter() = %q, tail should not be in filter", filter)
+	}
+}
+
+func TestConvertProtoLogEntry_TextPayload(t *testing.T) {
+	ts := time.Date(2026, 3, 7, 10, 15, 32, 0, time.UTC)
+	entry := &loggingpb.LogEntry{
+		Timestamp: timestamppb.New(ts),
+		Severity:  ltype.LogSeverity_INFO,
+		Payload:   &loggingpb.LogEntry_TextPayload{TextPayload: "Agent started"},
+		Labels: map[string]string{
+			"agent_id":  "abc123",
+			"broker_id": "broker-west-1",
+		},
+		InsertId: "insert-proto-1",
+	}
+
+	result := ConvertProtoLogEntry(entry)
+
+	if result.Timestamp != ts {
+		t.Errorf("Timestamp = %v, want %v", result.Timestamp, ts)
+	}
+	if result.Message != "Agent started" {
+		t.Errorf("Message = %q, want %q", result.Message, "Agent started")
+	}
+	if result.Labels["broker_id"] != "broker-west-1" {
+		t.Errorf("Labels[broker_id] = %q, want %q", result.Labels["broker_id"], "broker-west-1")
+	}
+	if result.InsertID != "insert-proto-1" {
+		t.Errorf("InsertID = %q, want %q", result.InsertID, "insert-proto-1")
+	}
+}
+
+func TestConvertProtoLogEntry_JSONPayload(t *testing.T) {
+	fields := map[string]*structpb.Value{
+		"message":   structpb.NewStringValue("Failed to route"),
+		"subsystem": structpb.NewStringValue("hub.dispatch"),
+	}
+	entry := &loggingpb.LogEntry{
+		Timestamp: timestamppb.New(time.Now()),
+		Severity:  ltype.LogSeverity_ERROR,
+		Payload: &loggingpb.LogEntry_JsonPayload{
+			JsonPayload: &structpb.Struct{Fields: fields},
+		},
+		InsertId: "insert-proto-2",
+		SourceLocation: &loggingpb.LogEntrySourceLocation{
+			File:     "pkg/hub/dispatch.go",
+			Line:     342,
+			Function: "dispatch",
+		},
+	}
+
+	result := ConvertProtoLogEntry(entry)
+
+	if result.Message != "Failed to route" {
+		t.Errorf("Message = %q, want %q", result.Message, "Failed to route")
+	}
+	if result.JSONPayload["subsystem"] != "hub.dispatch" {
+		t.Errorf("JSONPayload[subsystem] = %v, want %q", result.JSONPayload["subsystem"], "hub.dispatch")
+	}
+	if result.SourceLocation == nil {
+		t.Fatal("SourceLocation is nil")
+	}
+	if result.SourceLocation.File != "pkg/hub/dispatch.go" {
+		t.Errorf("File = %q, want %q", result.SourceLocation.File, "pkg/hub/dispatch.go")
+	}
+	if result.SourceLocation.Line != "342" {
+		t.Errorf("Line = %q, want %q", result.SourceLocation.Line, "342")
+	}
+}
+
+func TestConvertProtoLogEntry_Resource(t *testing.T) {
+	entry := &loggingpb.LogEntry{
+		Timestamp: timestamppb.New(time.Now()),
+		Severity:  ltype.LogSeverity_INFO,
+		Payload:   &loggingpb.LogEntry_TextPayload{TextPayload: "test"},
+		InsertId:  "insert-proto-3",
+		Resource: &mrpb.MonitoredResource{
+			Type: "gce_instance",
+			Labels: map[string]string{
+				"instance_id": "12345",
+			},
+		},
+	}
+
+	result := ConvertProtoLogEntry(entry)
+
+	if result.Resource == nil {
+		t.Fatal("Resource is nil")
+	}
+	if result.Resource["type"] != "gce_instance" {
+		t.Errorf("Resource.type = %v, want %q", result.Resource["type"], "gce_instance")
 	}
 }

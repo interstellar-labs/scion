@@ -34,6 +34,7 @@ var (
 	logsSince    string
 	logsFollow   bool
 	logsSeverity string
+	logsBroker   string
 	logsJSON     bool
 )
 
@@ -101,6 +102,7 @@ func init() {
 	logsCmd.Flags().StringVar(&logsSince, "since", "", "Show logs since timestamp/duration (e.g., 1h, 2026-03-07T10:00:00Z)")
 	logsCmd.Flags().BoolVarP(&logsFollow, "follow", "f", false, "Stream logs in real-time")
 	logsCmd.Flags().StringVar(&logsSeverity, "severity", "", "Minimum severity level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+	logsCmd.Flags().StringVar(&logsBroker, "broker", "", "Filter by runtime broker ID")
 	logsCmd.Flags().BoolVar(&logsJSON, "json", false, "Output full JSON entries")
 }
 
@@ -111,6 +113,7 @@ func getHubCloudLogs(ctx context.Context, hubCtx *HubContext, agentName string) 
 	opts := &hubclient.GetCloudLogsOptions{
 		Tail:     logsTail,
 		Severity: logsSeverity,
+		BrokerID: logsBroker,
 	}
 
 	// Resolve --since flag: supports both RFC3339 and duration formats
