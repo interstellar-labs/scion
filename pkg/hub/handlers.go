@@ -6372,6 +6372,15 @@ func (s *Server) populateAgentConfig(agent *store.Agent, grove *store.Grove, res
 					}
 				}
 			}
+			// Merge template telemetry config as default (don't overwrite explicit inline telemetry)
+			if resolvedTemplate.Config.Telemetry != nil {
+				if agent.AppliedConfig.InlineConfig == nil {
+					agent.AppliedConfig.InlineConfig = &api.ScionConfig{}
+				}
+				if agent.AppliedConfig.InlineConfig.Telemetry == nil {
+					agent.AppliedConfig.InlineConfig.Telemetry = resolvedTemplate.Config.Telemetry
+				}
+			}
 		}
 	}
 }

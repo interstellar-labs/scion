@@ -387,6 +387,7 @@ type TemplateConfig struct {
 	Kubernetes  *KubernetesConfig `json:"kubernetes,omitempty"`
 	HubAccess   *HubAccessConfig  `json:"hubAccess,omitempty"`
 	Secrets     []api.RequiredSecret `json:"secrets,omitempty"`
+	Telemetry   *api.TelemetryConfig `json:"telemetry,omitempty"`
 }
 
 // HubAccessConfig defines what Hub API scopes an agent created from this template receives.

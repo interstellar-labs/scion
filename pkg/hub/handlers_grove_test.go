@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/ptone/scion-agent/pkg/agent/state"
+	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/store"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -170,6 +171,96 @@ func TestPopulateAgentConfig_GitGrove_NoWorkspace(t *testing.T) {
 		"Workspace should not be set for git-backed groves")
 	assert.NotNil(t, agent.AppliedConfig.GitClone,
 		"GitClone should be set for git-backed groves")
+}
+
+func TestPopulateAgentConfig_TemplateTelemetryMerged(t *testing.T) {
+	srv, _ := testServer(t)
+
+	grove := &store.Grove{
+		ID:   "grove-telem",
+		Name: "Telemetry Grove",
+		Slug: "telemetry-grove",
+	}
+
+	enabled := true
+	tmplTelemetry := &api.TelemetryConfig{
+		Enabled: &enabled,
+		Cloud: &api.TelemetryCloudConfig{
+			Endpoint: "https://otel.example.com",
+			Provider: "gcp",
+		},
+	}
+
+	template := &store.Template{
+		ID:   "tmpl-telem",
+		Slug: "telem-template",
+		Config: &store.TemplateConfig{
+			Telemetry: tmplTelemetry,
+		},
+	}
+
+	agent := &store.Agent{
+		ID:            "agent-telem",
+		AppliedConfig: &store.AgentAppliedConfig{},
+	}
+
+	srv.populateAgentConfig(agent, grove, template)
+
+	require.NotNil(t, agent.AppliedConfig.InlineConfig,
+		"InlineConfig should be created to hold template telemetry")
+	require.NotNil(t, agent.AppliedConfig.InlineConfig.Telemetry,
+		"Telemetry should be merged from template")
+	assert.Equal(t, &enabled, agent.AppliedConfig.InlineConfig.Telemetry.Enabled)
+	assert.Equal(t, "https://otel.example.com", agent.AppliedConfig.InlineConfig.Telemetry.Cloud.Endpoint)
+	assert.Equal(t, "gcp", agent.AppliedConfig.InlineConfig.Telemetry.Cloud.Provider)
+}
+
+func TestPopulateAgentConfig_InlineTelemetryNotOverwritten(t *testing.T) {
+	srv, _ := testServer(t)
+
+	grove := &store.Grove{
+		ID:   "grove-telem2",
+		Name: "Telemetry Grove 2",
+		Slug: "telemetry-grove-2",
+	}
+
+	enabled := true
+	tmplTelemetry := &api.TelemetryConfig{
+		Enabled: &enabled,
+		Cloud: &api.TelemetryCloudConfig{
+			Endpoint: "https://template-otel.example.com",
+		},
+	}
+
+	inlineTelemetry := &api.TelemetryConfig{
+		Cloud: &api.TelemetryCloudConfig{
+			Endpoint: "https://inline-otel.example.com",
+		},
+	}
+
+	template := &store.Template{
+		ID:   "tmpl-telem2",
+		Slug: "telem-template-2",
+		Config: &store.TemplateConfig{
+			Telemetry: tmplTelemetry,
+		},
+	}
+
+	agent := &store.Agent{
+		ID: "agent-telem2",
+		AppliedConfig: &store.AgentAppliedConfig{
+			InlineConfig: &api.ScionConfig{
+				Telemetry: inlineTelemetry,
+			},
+		},
+	}
+
+	srv.populateAgentConfig(agent, grove, template)
+
+	// Inline telemetry should NOT be overwritten by template telemetry
+	assert.Equal(t, "https://inline-otel.example.com",
+		agent.AppliedConfig.InlineConfig.Telemetry.Cloud.Endpoint,
+		"Explicit inline telemetry should take precedence over template")
 }
 
 // TestCreateAgent_HubNativeGrove_ExplicitBroker_AutoLinks tests that creating an agent
