@@ -21,6 +21,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"bufio"
+	"strings"
+
 	"github.com/ptone/scion-agent/pkg/brokercredentials"
 	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/harness"
@@ -31,6 +34,7 @@ import (
 )
 
 var globalInit bool
+var initImageRegistry string
 
 // groveCmd represents the grove command
 var groveCmd = &cobra.Command{
@@ -59,20 +63,40 @@ With --global, it initializes in the user's home folder.`,
 			if !isJSONOutput() {
 				fmt.Println("Initializing global scion directory...")
 			}
-			if err := config.InitMachine(harnesses); err != nil {
+
+			// Resolve image registry: flag > prompt > skip
+			registryValue := initImageRegistry
+			if registryValue == "" && !isJSONOutput() {
+				registryValue = promptImageRegistry()
+			}
+
+			opts := config.InitMachineOpts{ImageRegistry: registryValue}
+			if err := config.InitMachine(harnesses, opts); err != nil {
 				return fmt.Errorf("failed to initialize global config: %w", err)
 			}
 
 			if isJSONOutput() {
+				details := map[string]interface{}{"global": true, "machine": true}
+				if registryValue != "" {
+					details["image_registry"] = registryValue
+				}
 				return outputJSON(ActionResult{
 					Status:  "success",
 					Command: "grove init",
 					Message: "scion grove successfully initialized.",
-					Details: map[string]interface{}{"global": true, "machine": true},
+					Details: details,
 				})
 			}
 
 			fmt.Println("scion grove successfully initialized.")
+			if registryValue != "" {
+				fmt.Printf("Image registry: %s\n", registryValue)
+			} else {
+				fmt.Println()
+				fmt.Println("Note: image_registry is not configured. Agents cannot start without it.")
+				fmt.Println("  Build images first — see image-build/README.md")
+				fmt.Println("  Then run: scion config set --global image_registry <your-registry>")
+			}
 
 			// Prompt for Hub registration if Hub is configured
 			if err := promptHubRegistration(true); err != nil {
@@ -345,10 +369,39 @@ func getLocalBrokerInfo(settings *config.Settings) (brokerID, brokerName string)
 	return brokerID, brokerName
 }
 
+// promptImageRegistry prompts the user for their container image registry path.
+// Returns the entered value or empty string if skipped.
+func promptImageRegistry() string {
+	if nonInteractive {
+		return ""
+	}
+
+	fmt.Println()
+	fmt.Println("Scion runs agents in containers. You need to build and push container images")
+	fmt.Println("to a registry you control before starting agents.")
+	fmt.Println()
+	fmt.Println("  See: image-build/README.md for build instructions")
+	fmt.Println("  Quick start: image-build/scripts/build-images.sh --registry <registry> --push")
+	fmt.Println()
+
+	if !util.IsTerminal() {
+		return ""
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Image registry path (e.g., ghcr.io/myorg) — enter to skip: ")
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(input)
+}
+
 func init() {
 	rootCmd.AddCommand(groveCmd)
 	groveCmd.AddCommand(groveInitCmd)
 
 	groveInitCmd.Flags().BoolVar(&globalInit, "global", false, "Initialize the global grove in the home directory")
 	groveInitCmd.Flags().BoolVar(&machineInit, "machine", false, "Perform full machine-level setup (seeds harness-configs, templates, settings)")
+	groveInitCmd.Flags().StringVar(&initImageRegistry, "image-registry", "", "Container image registry path (e.g., ghcr.io/myorg)")
 }

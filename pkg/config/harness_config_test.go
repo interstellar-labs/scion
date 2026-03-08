@@ -32,7 +32,7 @@ func TestLoadHarnessConfigDir(t *testing.T) {
 	}
 
 	configYAML := `harness: claude
-image: us-central1-docker.pkg.dev/ptone-misc/public-docker/scion-claude:latest
+image: scion-claude:latest
 user: scion
 `
 	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configYAML), 0644); err != nil {
@@ -50,7 +50,7 @@ user: scion
 	if hc.Config.Harness != "claude" {
 		t.Errorf("expected harness 'claude', got %q", hc.Config.Harness)
 	}
-	if hc.Config.Image != "us-central1-docker.pkg.dev/ptone-misc/public-docker/scion-claude:latest" {
+	if hc.Config.Image != "scion-claude:latest" {
 		t.Errorf("expected image to be set, got %q", hc.Config.Image)
 	}
 	if hc.Config.User != "scion" {

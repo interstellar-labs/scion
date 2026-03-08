@@ -42,4 +42,5 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 	initCmd.Flags().BoolVar(&globalInit, "global", false, "Initialize the global grove in the home directory")
 	initCmd.Flags().BoolVar(&machineInit, "machine", false, "Perform full machine-level setup (seeds harness-configs, templates, settings)")
+	initCmd.Flags().StringVar(&initImageRegistry, "image-registry", "", "Container image registry path (e.g., ghcr.io/myorg)")
 }

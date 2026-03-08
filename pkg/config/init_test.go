@@ -489,6 +489,29 @@ func TestInitGlobal_IsAliasForInitMachine(t *testing.T) {
 	}
 }
 
+func TestInitMachine_WithImageRegistry(t *testing.T) {
+	tmpDir := t.TempDir()
+	mockRuntimeDetection(t, "docker")
+
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", origHome)
+
+	opts := InitMachineOpts{ImageRegistry: "ghcr.io/testorg"}
+	if err := InitMachine(GetMockHarnesses(), opts); err != nil {
+		t.Fatalf("InitMachine with ImageRegistry failed: %v", err)
+	}
+
+	globalDir := filepath.Join(tmpDir, GlobalDir)
+	vs, _, err := LoadEffectiveSettings(globalDir)
+	if err != nil {
+		t.Fatalf("LoadEffectiveSettings failed: %v", err)
+	}
+	if vs.ImageRegistry != "ghcr.io/testorg" {
+		t.Errorf("expected image_registry 'ghcr.io/testorg', got %q", vs.ImageRegistry)
+	}
+}
+
 func TestInitMachine_FailsWithNoRuntime(t *testing.T) {
 	tmpDir := t.TempDir()
 	mockRuntimeDetectionNone(t)

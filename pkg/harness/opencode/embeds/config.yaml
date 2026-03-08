@@ -1,3 +1,3 @@
 harness: opencode
-image: us-central1-docker.pkg.dev/ptone-misc/public-docker/scion-opencode:latest
+image: scion-opencode:latest
 user: scion

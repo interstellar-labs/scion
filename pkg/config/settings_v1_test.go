@@ -3134,6 +3134,18 @@ func TestRewriteImageRegistry(t *testing.T) {
 			newRegistry: "ghcr.io/myorg",
 			want:        "ghcr.io/myorg/scion-opencode:sha-abc123",
 		},
+		{
+			name:        "bare image name (no registry prefix)",
+			fullImage:   "scion-claude:latest",
+			newRegistry: "ghcr.io/myorg",
+			want:        "ghcr.io/myorg/scion-claude:latest",
+		},
+		{
+			name:        "bare image name empty registry",
+			fullImage:   "scion-gemini:latest",
+			newRegistry: "",
+			want:        "scion-gemini:latest",
+		},
 	}
 
 	for _, tt := range tests {
@@ -3276,6 +3288,98 @@ func TestUpdateVersionedSetting_ImageRegistry(t *testing.T) {
 	loaded, err := LoadSingleFileVersioned(dir)
 	require.NoError(t, err)
 	assert.Equal(t, "ghcr.io/myorg", loaded.ImageRegistry)
+}
+
+func TestIsImageRegistryConfigured(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings *VersionedSettings
+		profile  string
+		want     bool
+	}{
+		{
+			name:     "empty settings",
+			settings: &VersionedSettings{},
+			profile:  "",
+			want:     false,
+		},
+		{
+			name: "top-level registry set",
+			settings: &VersionedSettings{
+				ImageRegistry: "ghcr.io/myorg",
+			},
+			profile: "",
+			want:    true,
+		},
+		{
+			name: "profile-level registry set",
+			settings: &VersionedSettings{
+				ActiveProfile: "local",
+				Profiles: map[string]V1ProfileConfig{
+					"local": {ImageRegistry: "ghcr.io/myorg"},
+				},
+			},
+			profile: "local",
+			want:    true,
+		},
+		{
+			name: "no registry anywhere",
+			settings: &VersionedSettings{
+				ActiveProfile: "local",
+				Profiles: map[string]V1ProfileConfig{
+					"local": {Runtime: "docker"},
+				},
+			},
+			profile: "local",
+			want:    false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.settings.IsImageRegistryConfigured(tt.profile)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestRequireImageRegistry_NotConfigured(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a minimal versioned settings file without image_registry
+	vs := &VersionedSettings{
+		SchemaVersion: "1",
+		ActiveProfile: "local",
+		Profiles: map[string]V1ProfileConfig{
+			"local": {Runtime: "docker"},
+		},
+		HarnessConfigs: map[string]HarnessConfigEntry{},
+		Runtimes:       map[string]V1RuntimeConfig{},
+	}
+	require.NoError(t, SaveVersionedSettings(dir, vs))
+
+	err := RequireImageRegistry(dir, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "image_registry is not configured")
+	assert.Contains(t, err.Error(), "image-build/README.md")
+}
+
+func TestRequireImageRegistry_Configured(t *testing.T) {
+	dir := t.TempDir()
+
+	vs := &VersionedSettings{
+		SchemaVersion: "1",
+		ActiveProfile: "local",
+		ImageRegistry: "ghcr.io/myorg",
+		Profiles: map[string]V1ProfileConfig{
+			"local": {Runtime: "docker"},
+		},
+		HarnessConfigs: map[string]HarnessConfigEntry{},
+		Runtimes:       map[string]V1RuntimeConfig{},
+	}
+	require.NoError(t, SaveVersionedSettings(dir, vs))
+
+	err := RequireImageRegistry(dir, "")
+	assert.NoError(t, err)
 }
 
 // --- Helper ---

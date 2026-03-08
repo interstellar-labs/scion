@@ -141,6 +141,12 @@ func (vs *VersionedSettings) IsHubLocalOnly() bool {
 	return vs.Hub != nil && vs.Hub.LocalOnly != nil && *vs.Hub.LocalOnly
 }
 
+// IsImageRegistryConfigured returns true if image_registry is set at any level
+// (top-level or in any profile).
+func (vs *VersionedSettings) IsImageRegistryConfigured(profileName string) bool {
+	return vs.ResolveImageRegistry(profileName) != ""
+}
+
 // ResolveImageRegistry returns the effective image_registry for the given profile.
 // Profile-level image_registry takes precedence over the top-level setting.
 func (vs *VersionedSettings) ResolveImageRegistry(profileName string) string {
@@ -151,6 +157,28 @@ func (vs *VersionedSettings) ResolveImageRegistry(profileName string) string {
 		return profile.ImageRegistry
 	}
 	return vs.ImageRegistry
+}
+
+// RequireImageRegistry checks that image_registry is configured and returns an
+// actionable error if not. This is called early in command execution to fail fast.
+func RequireImageRegistry(grovePath, profileName string) error {
+	vs, _, err := LoadEffectiveSettings(grovePath)
+	if err != nil {
+		// Can't load settings — let other code handle this error
+		return nil
+	}
+	if vs == nil {
+		return nil
+	}
+	if vs.IsImageRegistryConfigured(profileName) {
+		return nil
+	}
+	return fmt.Errorf("image_registry is not configured.\n\n" +
+		"Scion requires container images to run agents. To get started:\n\n" +
+		"  1. Build your images:  image-build/scripts/build-images.sh --registry <your-registry> --push\n" +
+		"     See image-build/README.md for detailed instructions.\n\n" +
+		"  2. Configure scion:   scion config set --global image_registry <your-registry>\n" +
+		"     Example:           scion config set --global image_registry ghcr.io/myorg")
 }
 
 // RewriteImageRegistry replaces the registry prefix of a container image reference

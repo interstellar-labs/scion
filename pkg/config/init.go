@@ -399,9 +399,16 @@ func InitProject(targetDir string, harnesses []api.Harness, opts ...InitProjectO
 	return nil
 }
 
+// InitMachineOpts controls optional behavior for InitMachine.
+type InitMachineOpts struct {
+	// ImageRegistry is the container image registry to configure.
+	// If non-empty, it is written into settings after seeding.
+	ImageRegistry string
+}
+
 // InitMachine performs full global/machine-level setup: creates ~/.scion/,
 // seeds settings, harness-configs, and the default agnostic template.
-func InitMachine(harnesses []api.Harness) error {
+func InitMachine(harnesses []api.Harness, opts ...InitMachineOpts) error {
 	globalDir, err := GetGlobalDir()
 	if err != nil {
 		return err
@@ -461,6 +468,17 @@ func InitMachine(harnesses []api.Harness) error {
 		return fmt.Errorf("failed to pre-populate broker ID: %w", err)
 	}
 
+	// Set image_registry if provided via opts
+	var opt InitMachineOpts
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	if opt.ImageRegistry != "" {
+		if err := UpdateSetting(globalDir, "image_registry", opt.ImageRegistry, true); err != nil {
+			return fmt.Errorf("failed to set image_registry: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -484,6 +502,6 @@ func ensureBrokerID(globalDir string) error {
 }
 
 // InitGlobal is an alias for InitMachine, kept for backward compatibility.
-func InitGlobal(harnesses []api.Harness) error {
-	return InitMachine(harnesses)
+func InitGlobal(harnesses []api.Harness, opts ...InitMachineOpts) error {
+	return InitMachine(harnesses, opts...)
 }

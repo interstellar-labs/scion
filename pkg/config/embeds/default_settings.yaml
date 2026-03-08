@@ -17,6 +17,13 @@ default_template: default
 # Env: SCION_DEFAULT_HARNESS_CONFIG
 default_harness_config: gemini
 
+# Container image registry path (REQUIRED)
+# Set this to the registry where your scion images are hosted.
+# Build images first — see image-build/README.md for instructions.
+# Example: ghcr.io/myorg, us-central1-docker.pkg.dev/myproject/scion
+# Env: SCION_IMAGE_REGISTRY
+image_registry: ""
+
 # CLI behavior settings
 cli:
   autohelp: true

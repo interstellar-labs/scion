@@ -124,6 +124,22 @@ return an error instead of blocking.`,
 			}
 		}
 
+		// Check image_registry is configured for commands that need it.
+		// Skip for config commands (users need those to set the registry).
+		requiresRegistry := requiresGrove
+		switch cmdName {
+		case "config":
+			requiresRegistry = false
+		}
+		if parentName == "config" {
+			requiresRegistry = false
+		}
+		if requiresRegistry {
+			if err := config.RequireImageRegistry(grovePath, profile); err != nil {
+				return err
+			}
+		}
+
 		// Check for dev auth usage and warn if Hub is enabled
 		printDevAuthWarningIfNeeded(grovePath)
 
