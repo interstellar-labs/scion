@@ -88,3 +88,14 @@ The permissions system features:
 - **Capability Gating**: UI and API enforcement via `_capabilities`.
 - **Policy Enforcement**: Strict authorization for agent creation, interaction, and deletion based on grove membership and ownership.
 - **Group & Policy Management**: Full support for group and policy schemas in the database, manageable via the Web Dashboard.
+
+## Managing Users and Groups
+
+The Scion Web Dashboard includes a centralized **Admin Management Suite** (accessible to users with administrative privileges) that provides dedicated views for access control management:
+
+- **Users List**: View all authenticated users, search for specific accounts, and manage their system-wide roles (e.g., granting `hub:admin` access).
+- **Groups Management**: Create organizational groups and manage their membership. This enables policy-based authorization where permissions can be granted to an entire team at once.
+- **Broker Visibility**: Comprehensive broker detail pages provide a grouped view of all active agents by their respective groves, helping administrators understand resource distribution.
+- **Maintenance Mode**: Administrators can toggle maintenance mode for the Hub and Web servers directly from the UI to facilitate safe infrastructure updates.
+
+By leveraging these administrative views, Platform Ops can efficiently map their organization's structure directly into Scion's Principal and Policy hierarchy.
