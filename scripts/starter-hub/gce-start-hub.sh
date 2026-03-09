@@ -131,6 +131,8 @@ if $FULL_DEPLOY; then
     cat <<'SETTINGS_EOF' > "$UPLOAD_DIR/scion-settings.yaml"
 schema_version: "1"
 default_runtime: kubernetes
+server:
+  mode: production
 hub:
   endpoint: "https://hub.demo.scion-ai.dev"
 telemetry:
@@ -212,14 +214,9 @@ EOF
         sudo mkdir -p /home/scion/.scion
         sudo chown scion:scion /home/scion/.scion
         ${PLACE_HUB_ENV}
-        if [ ! -f /home/scion/.scion/settings.yaml ]; then
-            sudo mv /tmp/scion-settings.yaml /home/scion/.scion/settings.yaml
-            sudo chown scion:scion /home/scion/.scion/settings.yaml
-            echo '  -> Installed settings.yaml'
-        else
-            echo '  -> settings.yaml already exists, skipping'
-            rm -f /tmp/scion-settings.yaml
-        fi
+        sudo mv /tmp/scion-settings.yaml /home/scion/.scion/settings.yaml
+        sudo chown scion:scion /home/scion/.scion/settings.yaml
+        echo '  -> Installed settings.yaml'
     "
     substep "Config files placed on instance"
 fi
