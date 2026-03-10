@@ -527,12 +527,6 @@ export class ScionPageTerminal extends LitElement {
     this.clipboardAddon = null;
   }
 
-  private handleBackToAgent(e: Event): void {
-    e.preventDefault();
-    this.cleanup();
-    window.location.href = `/agents/${this.agentId}`;
-  }
-
   private handleReconnect(): void {
     this.cleanup();
     void this.loadAgentInfo();
@@ -576,7 +570,7 @@ export class ScionPageTerminal extends LitElement {
 
     return html`
       <div class="toolbar">
-        <a href="/agents/${this.agentId}" class="back-link" @click=${(e: Event) => this.handleBackToAgent(e)}>
+        <a href="/agents/${this.agentId}" class="back-link">
           &larr; Back to Agent
         </a>
         <div class="separator"></div>
