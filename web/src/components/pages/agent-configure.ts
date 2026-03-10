@@ -352,17 +352,28 @@ export class ScionPageAgentConfigure extends LitElement {
     void this.loadAgent();
   }
 
+  private globalTelemetryDefault = false;
+
   private async loadAgent(): Promise<void> {
     this.loading = true;
     this.error = null;
 
     try {
-      const res = await apiFetch(`/api/v1/agents/${this.agentId}`);
-      if (!res.ok) {
-        throw new Error(await extractApiError(res, `HTTP ${res.status}`));
+      const [agentRes, settingsRes] = await Promise.all([
+        apiFetch(`/api/v1/agents/${this.agentId}`),
+        apiFetch('/api/v1/settings/public'),
+      ]);
+
+      if (settingsRes.ok) {
+        const data = (await settingsRes.json()) as { telemetryEnabled?: boolean };
+        this.globalTelemetryDefault = data.telemetryEnabled ?? false;
       }
 
-      this.agent = (await res.json()) as AgentWithConfig;
+      if (!agentRes.ok) {
+        throw new Error(await extractApiError(agentRes, `HTTP ${agentRes.status}`));
+      }
+
+      this.agent = (await agentRes.json()) as AgentWithConfig;
 
       if (this.agent.phase !== 'created') {
         this.error = `This agent is in "${this.agent.phase}" phase and cannot be configured. Only agents in "created" phase can be edited.`;
@@ -389,7 +400,7 @@ export class ScionPageAgentConfigure extends LitElement {
     this.containerUser = ic?.user || '';
     this.authMethod = ac?.harnessAuth || ic?.auth_selectedType || '';
     this.harnessConfig = ac?.harnessConfig || ic?.harness_config || '';
-    this.telemetryEnabled = ic?.telemetry?.enabled ?? false;
+    this.telemetryEnabled = ic?.telemetry?.enabled ?? this.globalTelemetryDefault;
 
     // Task & Prompts
     this.task = ac?.task || ic?.task || '';

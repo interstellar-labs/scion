@@ -690,6 +690,21 @@ func loadServerFromSettingsFile(dir string) (*GlobalConfig, bool) {
 	}
 
 	gc := ConvertV1ServerToGlobalConfig(&v1Server)
+
+	// Also check for top-level "telemetry" section — it lives outside "server"
+	// in settings.yaml but controls the default telemetry opt-in for the Hub.
+	if telRaw, ok := raw["telemetry"]; ok && telRaw != nil {
+		telData, err := yamlv3.Marshal(telRaw)
+		if err == nil {
+			var telCfg V1TelemetryConfig
+			if err := yamlv3.Unmarshal(telData, &telCfg); err == nil {
+				if telCfg.Enabled != nil {
+					gc.TelemetryEnabled = telCfg.Enabled
+				}
+			}
+		}
+	}
+
 	return gc, true
 }
 

@@ -1522,6 +1522,87 @@ server:
 	assert.Equal(t, "test-dev-token", gc.Auth.Token)
 }
 
+func TestLoadGlobalConfig_TelemetryEnabledFromSettingsYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	globalDir := filepath.Join(tmpDir, ".scion")
+	require.NoError(t, os.MkdirAll(globalDir, 0755))
+
+	// Write settings.yaml with top-level telemetry section (separate from server)
+	settingsContent := `
+schema_version: "1"
+server:
+  mode: production
+  broker:
+    broker_id: "test-broker-id"
+telemetry:
+  enabled: true
+  cloud:
+    enabled: true
+    endpoint: "cloudtrace.googleapis.com:443"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "settings.yaml"), []byte(settingsContent), 0644))
+
+	gc, err := LoadGlobalConfig(globalDir)
+	require.NoError(t, err)
+
+	require.NotNil(t, gc.TelemetryEnabled, "TelemetryEnabled should be populated from top-level telemetry.enabled")
+	assert.True(t, *gc.TelemetryEnabled)
+}
+
+func TestLoadGlobalConfig_TelemetryDisabledFromSettingsYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	globalDir := filepath.Join(tmpDir, ".scion")
+	require.NoError(t, os.MkdirAll(globalDir, 0755))
+
+	settingsContent := `
+schema_version: "1"
+server:
+  mode: production
+telemetry:
+  enabled: false
+`
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "settings.yaml"), []byte(settingsContent), 0644))
+
+	gc, err := LoadGlobalConfig(globalDir)
+	require.NoError(t, err)
+
+	require.NotNil(t, gc.TelemetryEnabled)
+	assert.False(t, *gc.TelemetryEnabled)
+}
+
+func TestLoadGlobalConfig_NoTelemetrySectionLeavesNil(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	globalDir := filepath.Join(tmpDir, ".scion")
+	require.NoError(t, os.MkdirAll(globalDir, 0755))
+
+	settingsContent := `
+schema_version: "1"
+server:
+  mode: production
+`
+	require.NoError(t, os.WriteFile(filepath.Join(globalDir, "settings.yaml"), []byte(settingsContent), 0644))
+
+	gc, err := LoadGlobalConfig(globalDir)
+	require.NoError(t, err)
+
+	assert.Nil(t, gc.TelemetryEnabled, "TelemetryEnabled should be nil when no telemetry section exists")
+}
+
 func TestLoadGlobalConfig_SettingsYAMLPreferredOverServerYAML(t *testing.T) {
 	tmpDir := t.TempDir()
 
