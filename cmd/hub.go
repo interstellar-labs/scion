@@ -1962,10 +1962,80 @@ func runHubLink(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Offer to sync grove templates to Hub
+	offerTemplateSyncOnLink(resolvedPath, endpoint, groveID)
+
 	// Display available brokers for this grove
 	listBrokersForGrove(ctx, client, groveID)
 
 	return nil
+}
+
+// offerTemplateSyncOnLink detects local grove templates and prompts
+// the user to sync them to the Hub during grove linking.
+func offerTemplateSyncOnLink(grovePath, endpoint, groveID string) {
+	// List grove-scoped templates
+	_, groveTemplates, err := config.ListTemplatesGrouped()
+	if err != nil || len(groveTemplates) == 0 {
+		return
+	}
+
+	if !util.IsTerminal() {
+		fmt.Printf("\nSkipping template sync (non-interactive mode).\n")
+		fmt.Println("Run 'scion templates sync --all' to upload grove templates.")
+		return
+	}
+
+	// Show discovered templates
+	fmt.Printf("\nFound %d grove template(s) not yet synced to Hub:\n", len(groveTemplates))
+	for _, t := range groveTemplates {
+		fmt.Printf("  - %s\n", t.Name)
+	}
+
+	if !hubsync.ConfirmAction("Sync these templates to the Hub?", true, autoConfirm) {
+		fmt.Println("Skipping template sync.")
+		fmt.Println("Run 'scion templates sync --all' to upload grove templates later.")
+		return
+	}
+
+	// Create a HubContext for syncing
+	settings, err := config.LoadSettings(grovePath)
+	if err != nil {
+		fmt.Printf("Warning: failed to load settings for template sync: %v\n", err)
+		return
+	}
+
+	client, err := getHubClient(settings)
+	if err != nil {
+		fmt.Printf("Warning: failed to create Hub client for template sync: %v\n", err)
+		return
+	}
+
+	hubCtx := &HubContext{
+		Client:    client,
+		Endpoint:  endpoint,
+		GrovePath: grovePath,
+		Settings:  settings,
+	}
+
+	fmt.Println("\nSyncing grove templates to Hub...")
+	var synced int
+	for _, tpl := range groveTemplates {
+		harnessType, err := detectHarnessType(tpl)
+		if err != nil {
+			fmt.Printf("  %s: skipped (failed to detect harness: %v)\n", tpl.Name, err)
+			continue
+		}
+
+		// Use force=false — don't overwrite existing Hub templates
+		err = syncTemplateToHub(hubCtx, tpl.Name, tpl.Path, "grove", harnessType)
+		if err != nil {
+			fmt.Printf("  %s: failed: %v\n", tpl.Name, err)
+			continue
+		}
+		synced++
+	}
+	fmt.Printf("%d template(s) synced to grove scope.\n", synced)
 }
 
 // registerGroveOnHub registers a new grove on the Hub.

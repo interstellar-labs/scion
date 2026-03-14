@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -289,4 +290,158 @@ func TestRunTemplateDelete_NoHub_Flag(t *testing.T) {
 	// Verify deleted
 	_, err = os.Stat(templateDir)
 	assert.True(t, os.IsNotExist(err), "template directory should be deleted")
+}
+
+func TestRunTemplateSync_RequiresArgOrAll(t *testing.T) {
+	// Calling sync with no args and no --all should error
+	err := runTemplateSync(nil, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requires a template name argument or --all flag")
+}
+
+func TestRunTemplateSync_AllAndArgConflict(t *testing.T) {
+	// Create a command with --all flag set
+	cmd := &cobra.Command{}
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().Bool("all", true, "")
+	cmd.Flags().Bool("force", false, "")
+
+	err := runTemplateSync(cmd, []string{"some-template"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot specify both a template name and --all")
+}
+
+func TestRunTemplateSync_AllAndNameConflict(t *testing.T) {
+	// Create a command with --all and --name flags set
+	cmd := &cobra.Command{}
+	cmd.Flags().String("name", "custom-name", "")
+	cmd.Flags().Bool("all", true, "")
+	cmd.Flags().Bool("force", false, "")
+
+	err := runTemplateSync(cmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot use --name with --all")
+}
+
+// newMockHubServerForSync creates a mock Hub server that supports template
+// list, create, upload, and finalize operations for testing sync.
+func newMockHubServerForSync(t *testing.T, groveID string, existingTemplates []map[string]interface{}) *httptest.Server {
+	t.Helper()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.URL.Path == "/healthz" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok"})
+
+		case strings.HasPrefix(r.URL.Path, "/api/v1/groves/") && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":   groveID,
+				"name": "test-grove",
+			})
+
+		case r.URL.Path == "/api/v1/templates" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"templates": existingTemplates,
+			})
+
+		case r.URL.Path == "/api/v1/templates" && r.Method == http.MethodPost:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"template": map[string]interface{}{
+					"id":   "new-tpl-id",
+					"name": "test-tpl",
+				},
+			})
+
+		case strings.HasSuffix(r.URL.Path, "/download") && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"files": []map[string]interface{}{
+					{
+						"path": "scion-agent.json",
+						"hash": "sha256:old-hash-value",
+						"url":  "http://example.com/download",
+					},
+				},
+			})
+
+		case strings.HasSuffix(r.URL.Path, "/upload-urls") && r.Method == http.MethodPost:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"uploadUrls": []interface{}{},
+			})
+
+		case strings.HasSuffix(r.URL.Path, "/finalize") && r.Method == http.MethodPost:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":          "new-tpl-id",
+				"name":        "test-tpl",
+				"status":      "active",
+				"contentHash": "sha256:abc123",
+			})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+func TestRunTemplateSync_ConflictDetection(t *testing.T) {
+	orig := saveTemplateTestState()
+	defer orig.restore()
+
+	tmpHome := t.TempDir()
+	os.Setenv("HOME", tmpHome)
+	origHubEndpoint := os.Getenv("SCION_HUB_ENDPOINT")
+	os.Unsetenv("SCION_HUB_ENDPOINT")
+	defer os.Setenv("SCION_HUB_ENDPOINT", origHubEndpoint)
+	globalMode = true
+	autoConfirm = true
+	noHub = false
+
+	// Create a local template
+	createTestTemplate(t, tmpHome, "conflict-tpl")
+
+	groveID := "grove-conflict-123"
+
+	// Hub server returns an existing template with a different hash
+	server := newMockHubServerForSync(t, groveID, []map[string]interface{}{
+		{
+			"id":          "existing-tpl-id",
+			"name":        "conflict-tpl",
+			"slug":        "conflict-tpl",
+			"scope":       "global",
+			"status":      "active",
+			"contentHash": "sha256:different-hash",
+		},
+	})
+	defer server.Close()
+
+	grovePath = setupHubGrove(t, tmpHome, server.URL, groveID)
+
+	// Create the cobra command without --force
+	cmd := &cobra.Command{}
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().Bool("all", false, "")
+	cmd.Flags().Bool("force", false, "")
+
+	err := runTemplateSync(cmd, []string{"conflict-tpl"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already exists")
+	assert.Contains(t, err.Error(), "Use --force")
+}
+
+func TestRunTemplateStatus_NoHub(t *testing.T) {
+	orig := saveTemplateTestState()
+	defer orig.restore()
+
+	tmpHome := t.TempDir()
+	os.Setenv("HOME", tmpHome)
+	globalMode = true
+	noHub = true
+	autoConfirm = true
+
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpHome, ".scion", "templates"), 0755))
+
+	// Status requires Hub, so it should fail with no-hub
+	err := runTemplateStatus(nil, nil)
+	require.Error(t, err)
 }

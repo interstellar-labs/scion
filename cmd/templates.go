@@ -645,7 +645,7 @@ are made. Use --force to overwrite the existing default template.`,
 
 // templatesSyncCmd creates or updates a template in the Hub (upsert).
 var templatesSyncCmd = &cobra.Command{
-	Use:   "sync <template>",
+	Use:   "sync [template]",
 	Short: "Create or update a template in the Hub (Hub only)",
 	Long: `Sync a local template to the Hub. Creates the template if it doesn't exist,
 or updates it if it does. This is an upsert operation.
@@ -653,22 +653,33 @@ or updates it if it does. This is an upsert operation.
 The harness type is automatically detected from the template's configuration file.
 Use the root --global flag to sync to global scope instead of grove scope.
 
+Use --all to sync all grove-scoped local templates to the Hub at once.
+Use --force to overwrite existing Hub templates even when they already exist
+(by default, a conflict warning is shown for templates that already exist on the Hub
+with different content).
+
 Examples:
   # Sync a local template to the Hub (grove scope by default)
   scion templates sync custom-claude
+
+  # Sync all grove templates to Hub
+  scion templates sync --all
 
   # Sync with global scope
   scion --global templates sync custom-claude
 
   # Sync with a different name on the Hub
-  scion templates sync custom-claude --name my-team-claude`,
-	Args: cobra.ExactArgs(1),
+  scion templates sync custom-claude --name my-team-claude
+
+  # Force overwrite of existing Hub template
+  scion templates sync custom-claude --force`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runTemplateSync,
 }
 
 // templatesPushCmd is a semantic alias for sync.
 var templatesPushCmd = &cobra.Command{
-	Use:   "push <template>",
+	Use:   "push [template]",
 	Short: "Upload local template to Hub (alias for sync)",
 	Long: `Push a local template to the Hub. This is a semantic alias for 'sync'.
 
@@ -676,31 +687,35 @@ Examples:
   # Push a local template to the Hub
   scion templates push custom-claude
 
+  # Push all grove templates to Hub
+  scion templates push --all
+
   # Push with global scope
   scion --global templates push custom-claude`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runTemplateSync,
 }
 
 // runTemplateSync implements the shared logic for sync and push commands.
 func runTemplateSync(cmd *cobra.Command, args []string) error {
-	localTemplateName := args[0]
-
 	// Get flags - handle nil cmd for testing
 	var hubName string
+	var syncAll, force bool
 	if cmd != nil {
 		hubName, _ = cmd.Flags().GetString("name")
+		syncAll, _ = cmd.Flags().GetBool("all")
+		force, _ = cmd.Flags().GetBool("force")
 	}
 
-	// Determine destination scope from root's --global flag
-	destScope := "grove"
-	if globalMode {
-		destScope = "global"
+	// Validate args: either --all or a template name is required
+	if !syncAll && len(args) == 0 {
+		return fmt.Errorf("requires a template name argument or --all flag")
 	}
-
-	// If no explicit Hub name, use the local template name
-	if hubName == "" {
-		hubName = localTemplateName
+	if syncAll && len(args) > 0 {
+		return fmt.Errorf("cannot specify both a template name and --all")
+	}
+	if syncAll && hubName != "" {
+		return fmt.Errorf("cannot use --name with --all")
 	}
 
 	// Check Hub availability first (we need it for sync anyway)
@@ -713,6 +728,23 @@ func runTemplateSync(cmd *cobra.Command, args []string) error {
 	}
 
 	PrintUsingHub(hubCtx.Endpoint)
+
+	// Determine destination scope from root's --global flag
+	destScope := "grove"
+	if globalMode {
+		destScope = "global"
+	}
+
+	if syncAll {
+		return syncAllTemplatesToHub(hubCtx, destScope, force)
+	}
+
+	localTemplateName := args[0]
+
+	// If no explicit Hub name, use the local template name
+	if hubName == "" {
+		hubName = localTemplateName
+	}
 
 	// Build resolution options - local only for source, since we're syncing TO hub
 	opts := &ResolveOpts{
@@ -739,7 +771,64 @@ func runTemplateSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read template config: %w", err)
 	}
 
-	return syncTemplateToHub(hubCtx, hubName, tpl.Path, destScope, harnessType)
+	return syncTemplateToHub(hubCtx, hubName, tpl.Path, destScope, harnessType, force)
+}
+
+// syncAllTemplatesToHub syncs all local grove templates to the Hub.
+func syncAllTemplatesToHub(hubCtx *HubContext, scope string, force bool) error {
+	// Get local templates based on scope
+	localGlobal, localGrove, err := config.ListTemplatesGrouped()
+	if err != nil {
+		return fmt.Errorf("failed to list local templates: %w", err)
+	}
+
+	var templates []*config.Template
+	if scope == "global" {
+		templates = localGlobal
+	} else {
+		templates = localGrove
+	}
+
+	if len(templates) == 0 {
+		fmt.Printf("No local %s templates found to sync.\n", scope)
+		return nil
+	}
+
+	fmt.Printf("Syncing %d %s template(s) to Hub...\n", len(templates), scope)
+
+	var synced, skipped, failed int
+	for _, tpl := range templates {
+		harnessType, err := detectHarnessType(tpl)
+		if err != nil {
+			fmt.Printf("  %s: failed to detect harness type: %v\n", tpl.Name, err)
+			failed++
+			continue
+		}
+
+		err = syncTemplateToHub(hubCtx, tpl.Name, tpl.Path, scope, harnessType, force)
+		if err != nil {
+			if strings.Contains(err.Error(), "already exists") {
+				fmt.Printf("  %s: skipped (conflict, use --force to overwrite)\n", tpl.Name)
+				skipped++
+			} else {
+				fmt.Printf("  %s: failed: %v\n", tpl.Name, err)
+				failed++
+			}
+			continue
+		}
+		synced++
+	}
+
+	fmt.Printf("\n%d template(s) synced", synced)
+	if skipped > 0 {
+		fmt.Printf(", %d skipped (conflicts)", skipped)
+	}
+	if failed > 0 {
+		fmt.Printf(", %d failed", failed)
+	}
+	fmt.Println()
+
+	return nil
 }
 
 
@@ -880,7 +969,10 @@ func pullTemplateFromHubMatch(hubCtx *HubContext, match *TemplateMatch, toPath s
 }
 
 // syncTemplateToHub creates or updates a template in the Hub.
-func syncTemplateToHub(hubCtx *HubContext, name, localPath, scope, harnessType string) error {
+// When force is false and a template with the same name already exists on the Hub
+// with different content, a conflict error is returned instead of overwriting.
+func syncTemplateToHub(hubCtx *HubContext, name, localPath, scope, harnessType string, force ...bool) error {
+	forceOverwrite := len(force) > 0 && force[0]
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
@@ -994,7 +1086,16 @@ func syncTemplateToHub(hubCtx *HubContext, name, localPath, scope, harnessType s
 				return nil
 			}
 
-			fmt.Printf("Found %d changed file(s), updating template...\n", len(filesToUpload))
+			// Conflict detection: if content differs and force is not set, warn and abort
+			if !forceOverwrite {
+				localHash := computeLocalContentHash(files)
+				return fmt.Errorf("template '%s' already exists at %s scope on the Hub\n"+
+					"  (content hash mismatch: local=%s, hub=%s)\n"+
+					"Use --force to overwrite the existing template",
+					name, scope, truncateHash(localHash), truncateHash(existingTemplate.ContentHash))
+			}
+
+			fmt.Printf("Found %d changed file(s), updating template (--force)...\n", len(filesToUpload))
 		}
 	} else {
 		// Create new template - upload all files
@@ -1125,6 +1226,193 @@ func syncTemplateToHub(hubCtx *HubContext, name, localPath, scope, harnessType s
 	return nil
 }
 
+// templatesStatusCmd shows the sync state of templates between local and Hub.
+var templatesStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show template sync status between local and Hub",
+	Long: `Show the sync status of templates between the local filesystem and the Hub.
+
+Compares local templates with Hub templates to determine which are synced,
+out of date, or only present in one location.
+
+Examples:
+  # Show sync status for grove templates
+  scion templates status
+
+  # Show sync status for global templates
+  scion --global templates status`,
+	RunE: runTemplateStatus,
+}
+
+func runTemplateStatus(cmd *cobra.Command, args []string) error {
+	// Get local templates grouped by scope
+	localGlobal, localGrove, err := config.ListTemplatesGrouped()
+	if err != nil {
+		return fmt.Errorf("failed to list local templates: %w", err)
+	}
+
+	// Check Hub availability
+	hubCtx, err := CheckHubAvailability(grovePath)
+	if err != nil {
+		return err
+	}
+	if hubCtx == nil {
+		return fmt.Errorf("Hub integration is not enabled. Use 'scion hub enable' first")
+	}
+
+	PrintUsingHub(hubCtx.Endpoint)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	groveID, _ := GetGroveID(hubCtx)
+
+	// Fetch hub templates
+	var hubGrove, hubGlobal []hubclient.Template
+	if groveID != "" {
+		resp, err := hubCtx.Client.Templates().List(ctx, &hubclient.ListTemplatesOptions{
+			Scope:   "grove",
+			GroveID: groveID,
+			Status:  "active",
+		})
+		if err == nil {
+			hubGrove = resp.Templates
+		}
+	}
+	globalResp, err := hubCtx.Client.Templates().List(ctx, &hubclient.ListTemplatesOptions{
+		Scope:  "global",
+		Status: "active",
+	})
+	if err == nil {
+		hubGlobal = globalResp.Templates
+	}
+
+	// Determine which scope to show
+	var localTemplates []*config.Template
+	var hubTemplates []hubclient.Template
+	scopeLabel := "grove"
+	if globalMode {
+		localTemplates = localGlobal
+		hubTemplates = hubGlobal
+		scopeLabel = "global"
+	} else {
+		localTemplates = localGrove
+		hubTemplates = hubGrove
+	}
+
+	// Build status entries
+	type statusEntry struct {
+		Name      string `json:"name"`
+		Local     bool   `json:"local"`
+		Hub       bool   `json:"hub"`
+		Status    string `json:"status"`
+		LocalHash string `json:"localHash,omitempty"`
+		HubHash   string `json:"hubHash,omitempty"`
+	}
+
+	// Build lookup maps
+	localMap := make(map[string]*config.Template)
+	for _, t := range localTemplates {
+		localMap[t.Name] = t
+	}
+	hubMap := make(map[string]*hubclient.Template)
+	for i := range hubTemplates {
+		hubMap[hubTemplates[i].Name] = &hubTemplates[i]
+	}
+
+	// Collect all template names
+	nameSet := make(map[string]bool)
+	for _, t := range localTemplates {
+		nameSet[t.Name] = true
+	}
+	for _, t := range hubTemplates {
+		nameSet[t.Name] = true
+	}
+
+	var names []string
+	for name := range nameSet {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var entries []statusEntry
+	for _, name := range names {
+		local := localMap[name]
+		hub := hubMap[name]
+
+		entry := statusEntry{
+			Name:  name,
+			Local: local != nil,
+			Hub:   hub != nil,
+		}
+
+		if local != nil && hub != nil {
+			// Both exist - compare hashes
+			files, err := hubclient.CollectFiles(local.Path, nil)
+			if err == nil {
+				localHash := computeLocalContentHash(files)
+				entry.LocalHash = localHash
+				entry.HubHash = hub.ContentHash
+				if localHash == hub.ContentHash {
+					entry.Status = "synced"
+				} else {
+					entry.Status = "out of date"
+				}
+			} else {
+				entry.Status = "unknown (hash error)"
+			}
+		} else if local != nil {
+			entry.Status = "local only"
+		} else {
+			entry.Status = "hub only"
+		}
+
+		entries = append(entries, entry)
+	}
+
+	if isJSONOutput() {
+		return outputJSON(map[string]interface{}{
+			"scope":     scopeLabel,
+			"groveId":   groveID,
+			"templates": entries,
+		})
+	}
+
+	groveName := ""
+	if groveID != "" {
+		groveName = groveID
+	}
+	fmt.Printf("Grove: %s\n\n", groveName)
+
+	if len(entries) == 0 {
+		fmt.Println("No templates found.")
+		return nil
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "TEMPLATE\tLOCAL\tHUB\tSTATUS")
+	for _, e := range entries {
+		localStr := "no"
+		if e.Local {
+			localStr = "yes"
+		}
+		hubStr := "no"
+		if e.Hub {
+			hubStr = "yes"
+		}
+		status := e.Status
+		if e.Status == "synced" {
+			status = "synced (hash match)"
+		} else if e.Status == "out of date" {
+			status = "out of date (local differs)"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.Name, localStr, hubStr, status)
+	}
+	w.Flush()
+
+	return nil
+}
+
 func init() {
 	rootCmd.AddCommand(templatesCmd)
 	templatesCmd.AddCommand(templatesListCmd)
@@ -1141,6 +1429,7 @@ func init() {
 	templatesCmd.AddCommand(templatesSyncCmd)
 	templatesCmd.AddCommand(templatesPushCmd)
 	templatesCmd.AddCommand(templatesPullCmd)
+	templatesCmd.AddCommand(templatesStatusCmd)
 
 	// Flags for update-default command
 	templatesUpdateDefaultCmd.Flags().Bool("force", false, "Overwrite the existing default template")
@@ -1166,9 +1455,13 @@ func init() {
 
 	// Flags for sync command (--global is inherited from root)
 	templatesSyncCmd.Flags().String("name", "", "Name for the template on the Hub (defaults to local template name)")
+	templatesSyncCmd.Flags().Bool("all", false, "Sync all local templates to the Hub")
+	templatesSyncCmd.Flags().Bool("force", false, "Overwrite existing Hub templates with different content")
 
 	// Flags for push command (same as sync, since push is an alias)
 	templatesPushCmd.Flags().String("name", "", "Name for the template on the Hub (defaults to local template name)")
+	templatesPushCmd.Flags().Bool("all", false, "Push all local templates to the Hub")
+	templatesPushCmd.Flags().Bool("force", false, "Overwrite existing Hub templates with different content")
 
 	// Flags for pull command
 	templatesPullCmd.Flags().String("to", "", "Destination path for downloaded template")
@@ -1216,24 +1509,35 @@ func init() {
 	cloneAlias.Flags().Bool("hub", false, "Only search Hub for source")
 	templateCmd.AddCommand(cloneAlias)
 
-	// Add sync, push, pull to singular alias (--global is inherited from root)
+	// Add sync, push, pull, status to singular alias (--global is inherited from root)
 	syncAlias := &cobra.Command{
-		Use:   "sync <template>",
+		Use:   "sync [template]",
 		Short: "Create or update a template in the Hub (Hub only)",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE:  runTemplateSync,
 	}
 	syncAlias.Flags().String("name", "", "Name for the template on the Hub (defaults to local template name)")
+	syncAlias.Flags().Bool("all", false, "Sync all local templates to the Hub")
+	syncAlias.Flags().Bool("force", false, "Overwrite existing Hub templates with different content")
 	templateCmd.AddCommand(syncAlias)
 
 	pushAlias := &cobra.Command{
-		Use:   "push <template>",
+		Use:   "push [template]",
 		Short: "Upload local template to Hub (alias for sync)",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE:  runTemplateSync,
 	}
 	pushAlias.Flags().String("name", "", "Name for the template on the Hub (defaults to local template name)")
+	pushAlias.Flags().Bool("all", false, "Push all local templates to the Hub")
+	pushAlias.Flags().Bool("force", false, "Overwrite existing Hub templates with different content")
 	templateCmd.AddCommand(pushAlias)
+
+	statusAlias := &cobra.Command{
+		Use:   "status",
+		Short: "Show template sync status between local and Hub",
+		RunE:  runTemplateStatus,
+	}
+	templateCmd.AddCommand(statusAlias)
 
 	pullAlias := &cobra.Command{
 		Use:   "pull <name>",
