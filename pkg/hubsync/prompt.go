@@ -154,8 +154,10 @@ type GroveMatch struct {
 }
 
 // ShowMatchingGrovesPrompt displays matching groves and asks the user to choose.
+// When hasGitRemote is true, the "Register as new grove" option is hidden
+// because the git URI enforces a single grove per remote.
 // Returns the choice and the selected grove ID if linking.
-func ShowMatchingGrovesPrompt(groveName string, matches []GroveMatch, autoConfirm bool) (GroveChoice, string) {
+func ShowMatchingGrovesPrompt(groveName string, matches []GroveMatch, hasGitRemote bool, autoConfirm bool) (GroveChoice, string) {
 	fmt.Println()
 	fmt.Printf("Found %d existing grove(s) with the name '%s' on the Hub:\n", len(matches), groveName)
 	fmt.Println()
@@ -167,13 +169,20 @@ func ShowMatchingGrovesPrompt(groveName string, matches []GroveMatch, autoConfir
 			fmt.Printf("  [%d] %s (ID: %s)\n", i+1, m.Name, m.ID)
 		}
 	}
-	fmt.Printf("  [%d] Register as a new grove (duplicate name)\n", len(matches)+1)
+	if !hasGitRemote {
+		fmt.Printf("  [%d] Register as a new grove (duplicate name)\n", len(matches)+1)
+	}
 	fmt.Println()
 
 	if autoConfirm {
 		// Auto-confirm defaults to linking to the first match
 		fmt.Printf("Auto-linking to: %s (ID: %s)\n", matches[0].Name, matches[0].ID)
 		return GroveChoiceLink, matches[0].ID
+	}
+
+	maxChoice := len(matches)
+	if !hasGitRemote {
+		maxChoice = len(matches) + 1
 	}
 
 	reader := bufio.NewReader(os.Stdin)
@@ -195,12 +204,12 @@ func ShowMatchingGrovesPrompt(groveName string, matches []GroveMatch, autoConfir
 			continue
 		}
 
-		if choice < 1 || choice > len(matches)+1 {
-			fmt.Printf("Invalid choice. Please enter 1-%d.\n", len(matches)+1)
+		if choice < 1 || choice > maxChoice {
+			fmt.Printf("Invalid choice. Please enter 1-%d.\n", maxChoice)
 			continue
 		}
 
-		if choice == len(matches)+1 {
+		if !hasGitRemote && choice == len(matches)+1 {
 			return GroveChoiceRegisterNew, ""
 		}
 

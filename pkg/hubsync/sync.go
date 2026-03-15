@@ -359,7 +359,8 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 
 				if !idMatched {
 					// No ID match - ask user what to do
-					choice, selectedID := ShowMatchingGrovesPrompt(groveName, matches, opts.AutoConfirm)
+					hasGitRemote := !isGlobal && util.GetGitRemote() != ""
+					choice, selectedID := ShowMatchingGrovesPrompt(groveName, matches, hasGitRemote, opts.AutoConfirm)
 					switch choice {
 					case GroveChoiceCancel:
 						return nil, fmt.Errorf("registration cancelled")
