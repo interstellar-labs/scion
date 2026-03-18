@@ -1449,12 +1449,13 @@ func (s *Server) performAgentDelete(w http.ResponseWriter, r *http.Request, agen
 		}
 		s.events.PublishAgentDeleted(ctx, agent.ID, agent.GroveID)
 	} else {
-		// Hard delete: permanently remove the agent record
+		// Hard delete: publish deletion event BEFORE removing the record so
+		// notification subscribers can be resolved while subscriptions still exist.
+		s.events.PublishAgentDeleted(ctx, agent.ID, agent.GroveID)
 		if err := s.store.DeleteAgent(ctx, agent.ID); err != nil {
 			writeErrorFromErr(w, err, "")
 			return
 		}
-		s.events.PublishAgentDeleted(ctx, agent.ID, agent.GroveID)
 	}
 
 	w.WriteHeader(http.StatusNoContent)

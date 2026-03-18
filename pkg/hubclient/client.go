@@ -67,6 +67,9 @@ type Client interface {
 	// Subscriptions returns the notification subscription operations interface.
 	Subscriptions() SubscriptionService
 
+	// SubscriptionTemplates returns the subscription template operations interface.
+	SubscriptionTemplates() SubscriptionTemplateService
+
 	// ScheduledEvents returns the scheduled event operations interface scoped to a grove.
 	ScheduledEvents(groveID string) ScheduledEventService
 
@@ -94,8 +97,9 @@ type client struct {
 	env            *envService
 	secrets        *secretService
 	authService    *authService
-	notifications  *notificationService
-	subscriptions  *subscriptionService
+	notifications           *notificationService
+	subscriptions           *subscriptionService
+	subscriptionTemplates   *subscriptionTemplateService
 }
 
 // New creates a new Hub API client.
@@ -121,6 +125,7 @@ func New(baseURL string, opts ...Option) (Client, error) {
 	c.authService = &authService{c: c}
 	c.notifications = &notificationService{c: c}
 	c.subscriptions = &subscriptionService{c: c}
+	c.subscriptionTemplates = &subscriptionTemplateService{c: c}
 
 	return c, nil
 }
@@ -188,6 +193,11 @@ func (c *client) Notifications() NotificationService {
 // Subscriptions returns the notification subscription operations interface.
 func (c *client) Subscriptions() SubscriptionService {
 	return c.subscriptions
+}
+
+// SubscriptionTemplates returns the subscription template operations interface.
+func (c *client) SubscriptionTemplates() SubscriptionTemplateService {
+	return c.subscriptionTemplates
 }
 
 // ScheduledEvents returns the scheduled event operations interface scoped to a grove.

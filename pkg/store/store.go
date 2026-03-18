@@ -731,6 +731,10 @@ type NotificationStore interface {
 	// GetSubscriptionsForSubscriber returns all subscriptions owned by a subscriber.
 	GetSubscriptionsForSubscriber(ctx context.Context, subscriberType, subscriberID string) ([]NotificationSubscription, error)
 
+	// UpdateNotificationSubscriptionTriggers updates the trigger activities of a subscription.
+	// Returns ErrNotFound if the subscription doesn't exist.
+	UpdateNotificationSubscriptionTriggers(ctx context.Context, id string, triggerActivities []string) error
+
 	// DeleteNotificationSubscription deletes a subscription by ID.
 	// Returns ErrNotFound if the subscription doesn't exist.
 	DeleteNotificationSubscription(ctx context.Context, id string) error
@@ -767,6 +771,22 @@ type NotificationStore interface {
 	// GetLastNotificationStatus returns the status of the most recent notification
 	// for a given subscription. Returns ("", nil) if no notifications exist.
 	GetLastNotificationStatus(ctx context.Context, subscriptionID string) (string, error)
+
+	// CreateSubscriptionTemplate creates a new subscription template.
+	CreateSubscriptionTemplate(ctx context.Context, tmpl *SubscriptionTemplate) error
+
+	// GetSubscriptionTemplate returns a template by ID.
+	// Returns ErrNotFound if the template doesn't exist.
+	GetSubscriptionTemplate(ctx context.Context, id string) (*SubscriptionTemplate, error)
+
+	// ListSubscriptionTemplates returns all templates, optionally filtered by grove.
+	// Pass empty groveID to include global templates only, or a specific groveID
+	// to include both global and grove-specific templates.
+	ListSubscriptionTemplates(ctx context.Context, groveID string) ([]SubscriptionTemplate, error)
+
+	// DeleteSubscriptionTemplate deletes a template by ID.
+	// Returns ErrNotFound if the template doesn't exist.
+	DeleteSubscriptionTemplate(ctx context.Context, id string) error
 }
 
 // =============================================================================

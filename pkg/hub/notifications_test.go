@@ -919,6 +919,164 @@ func TestNotificationDispatcher_GroveScopedSubscription(t *testing.T) {
 	assert.Equal(t, "COMPLETED", notifs[0].Status)
 }
 
+func TestNotificationDispatcher_DeletedTrigger(t *testing.T) {
+	env := setupNotificationTest(t)
+
+	// Replace subscription to include DELETED
+	ctx := context.Background()
+	require.NoError(t, env.store.DeleteNotificationSubscription(ctx, env.sub.ID))
+	deletedSub := &store.NotificationSubscription{
+		ID:                api.NewUUID(),
+		Scope:             store.SubscriptionScopeAgent,
+		AgentID:           env.watched.ID,
+		SubscriberType:    store.SubscriberTypeAgent,
+		SubscriberID:      env.subscriber.Slug,
+		GroveID:           env.grove.ID,
+		TriggerActivities: []string{"COMPLETED", "DELETED"},
+		CreatedAt:         time.Now(),
+		CreatedBy:         "test",
+	}
+	require.NoError(t, env.store.CreateNotificationSubscription(ctx, deletedSub))
+
+	env.nd.Start()
+	defer env.nd.Stop()
+
+	// Publish an agent deleted event
+	env.pub.PublishAgentDeleted(ctx, env.watched.ID, env.grove.ID)
+
+	require.Eventually(t, func() bool {
+		return len(env.dispatcher.getCalls()) == 1
+	}, 2*time.Second, 50*time.Millisecond)
+
+	calls := env.dispatcher.getCalls()
+	assert.Contains(t, calls[0].Message, "watched-agent has been DELETED")
+
+	notifs, err := env.store.GetNotifications(ctx, store.SubscriberTypeAgent, env.subscriber.Slug, false)
+	require.NoError(t, err)
+	assert.Len(t, notifs, 1)
+	assert.Equal(t, "DELETED", notifs[0].Status)
+}
+
+func TestNotificationDispatcher_DeletedNotMatchedWithoutSubscription(t *testing.T) {
+	env := setupNotificationTest(t)
+
+	// Default subscription does not include DELETED
+	env.nd.Start()
+	defer env.nd.Stop()
+
+	env.pub.PublishAgentDeleted(context.Background(), env.watched.ID, env.grove.ID)
+
+	// Give time for event to be processed
+	time.Sleep(200 * time.Millisecond)
+
+	// Should not trigger since default sub only has COMPLETED and WAITING_FOR_INPUT
+	assert.Empty(t, env.dispatcher.getCalls())
+}
+
+func TestFormatNotificationMessage_Deleted(t *testing.T) {
+	agent := &store.Agent{Slug: "worker"}
+	result := formatNotificationMessage(agent, "DELETED")
+	assert.Equal(t, "worker has been DELETED", result)
+}
+
+func TestUpdateNotificationSubscriptionTriggers(t *testing.T) {
+	env := setupNotificationTest(t)
+	ctx := context.Background()
+
+	// Update triggers
+	err := env.store.UpdateNotificationSubscriptionTriggers(ctx, env.sub.ID, []string{"COMPLETED", "DELETED"})
+	require.NoError(t, err)
+
+	// Verify update
+	sub, err := env.store.GetNotificationSubscription(ctx, env.sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"COMPLETED", "DELETED"}, sub.TriggerActivities)
+}
+
+func TestUpdateNotificationSubscriptionTriggers_NotFound(t *testing.T) {
+	env := setupNotificationTest(t)
+	ctx := context.Background()
+
+	err := env.store.UpdateNotificationSubscriptionTriggers(ctx, "nonexistent-id", []string{"COMPLETED"})
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestUpdateNotificationSubscriptionTriggers_InvalidInput(t *testing.T) {
+	env := setupNotificationTest(t)
+	ctx := context.Background()
+
+	err := env.store.UpdateNotificationSubscriptionTriggers(ctx, env.sub.ID, nil)
+	assert.ErrorIs(t, err, store.ErrInvalidInput)
+
+	err = env.store.UpdateNotificationSubscriptionTriggers(ctx, "", []string{"COMPLETED"})
+	assert.ErrorIs(t, err, store.ErrInvalidInput)
+}
+
+func TestSubscriptionTemplates_CRUD(t *testing.T) {
+	env := setupNotificationTest(t)
+	ctx := context.Background()
+
+	// Create
+	tmpl := &store.SubscriptionTemplate{
+		ID:                api.NewUUID(),
+		Name:              "Critical Only",
+		Scope:             store.SubscriptionScopeGrove,
+		TriggerActivities: []string{"ERROR", "LIMITS_EXCEEDED"},
+		GroveID:           env.grove.ID,
+		CreatedBy:         "test-user",
+	}
+	require.NoError(t, env.store.CreateSubscriptionTemplate(ctx, tmpl))
+
+	// Get
+	got, err := env.store.GetSubscriptionTemplate(ctx, tmpl.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Critical Only", got.Name)
+	assert.Equal(t, []string{"ERROR", "LIMITS_EXCEEDED"}, got.TriggerActivities)
+
+	// List with grove filter
+	templates, err := env.store.ListSubscriptionTemplates(ctx, env.grove.ID)
+	require.NoError(t, err)
+	assert.Len(t, templates, 1)
+	assert.Equal(t, "Critical Only", templates[0].Name)
+
+	// List without grove filter (only global templates)
+	globalTemplates, err := env.store.ListSubscriptionTemplates(ctx, "")
+	require.NoError(t, err)
+	assert.Empty(t, globalTemplates)
+
+	// Delete
+	require.NoError(t, env.store.DeleteSubscriptionTemplate(ctx, tmpl.ID))
+	_, err = env.store.GetSubscriptionTemplate(ctx, tmpl.ID)
+	assert.ErrorIs(t, err, store.ErrNotFound)
+}
+
+func TestSubscriptionTemplates_DuplicateName(t *testing.T) {
+	env := setupNotificationTest(t)
+	ctx := context.Background()
+
+	tmpl := &store.SubscriptionTemplate{
+		ID:                api.NewUUID(),
+		Name:              "My Template",
+		Scope:             store.SubscriptionScopeGrove,
+		TriggerActivities: []string{"COMPLETED"},
+		GroveID:           env.grove.ID,
+		CreatedBy:         "test-user",
+	}
+	require.NoError(t, env.store.CreateSubscriptionTemplate(ctx, tmpl))
+
+	// Same name in same grove should fail
+	tmpl2 := &store.SubscriptionTemplate{
+		ID:                api.NewUUID(),
+		Name:              "My Template",
+		Scope:             store.SubscriptionScopeGrove,
+		TriggerActivities: []string{"ERROR"},
+		GroveID:           env.grove.ID,
+		CreatedBy:         "test-user",
+	}
+	err := env.store.CreateSubscriptionTemplate(ctx, tmpl2)
+	assert.ErrorIs(t, err, store.ErrAlreadyExists)
+}
+
 func TestNotificationDispatcher_DeduplicateAcrossScopes(t *testing.T) {
 	env := setupNotificationTest(t)
 

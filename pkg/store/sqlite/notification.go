@@ -178,6 +178,29 @@ func (s *SQLiteStore) GetSubscriptionsForSubscriber(ctx context.Context, subscri
 	return scanSubscriptions(rows)
 }
 
+// UpdateNotificationSubscriptionTriggers updates the trigger activities of a subscription.
+func (s *SQLiteStore) UpdateNotificationSubscriptionTriggers(ctx context.Context, id string, triggerActivities []string) error {
+	if id == "" || len(triggerActivities) == 0 {
+		return store.ErrInvalidInput
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE notification_subscriptions SET trigger_activities = ? WHERE id = ?
+	`, marshalJSON(triggerActivities), id)
+	if err != nil {
+		return err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 // DeleteNotificationSubscription deletes a subscription by ID.
 func (s *SQLiteStore) DeleteNotificationSubscription(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx, `
@@ -364,6 +387,105 @@ func (s *SQLiteStore) GetLastNotificationStatus(ctx context.Context, subscriptio
 		return "", err
 	}
 	return status, nil
+}
+
+// ============================================================================
+// Subscription Template Operations
+// ============================================================================
+
+// CreateSubscriptionTemplate creates a new subscription template.
+func (s *SQLiteStore) CreateSubscriptionTemplate(ctx context.Context, tmpl *store.SubscriptionTemplate) error {
+	if tmpl.ID == "" || tmpl.Name == "" || len(tmpl.TriggerActivities) == 0 {
+		return store.ErrInvalidInput
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO subscription_templates (id, name, scope, trigger_activities, grove_id, created_by)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, tmpl.ID, tmpl.Name, tmpl.Scope, marshalJSON(tmpl.TriggerActivities), tmpl.GroveID, tmpl.CreatedBy)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return store.ErrAlreadyExists
+		}
+		return err
+	}
+	return nil
+}
+
+// GetSubscriptionTemplate returns a template by ID.
+func (s *SQLiteStore) GetSubscriptionTemplate(ctx context.Context, id string) (*store.SubscriptionTemplate, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, name, scope, trigger_activities, grove_id, created_by
+		FROM subscription_templates WHERE id = ?
+	`, id)
+
+	var tmpl store.SubscriptionTemplate
+	var triggersJSON string
+	if err := row.Scan(&tmpl.ID, &tmpl.Name, &tmpl.Scope, &triggersJSON, &tmpl.GroveID, &tmpl.CreatedBy); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, store.ErrNotFound
+		}
+		return nil, err
+	}
+	unmarshalJSON(triggersJSON, &tmpl.TriggerActivities)
+	return &tmpl, nil
+}
+
+// ListSubscriptionTemplates returns all templates. If groveID is non-empty,
+// returns both global templates and grove-specific templates.
+func (s *SQLiteStore) ListSubscriptionTemplates(ctx context.Context, groveID string) ([]store.SubscriptionTemplate, error) {
+	var rows *sql.Rows
+	var err error
+
+	if groveID != "" {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT id, name, scope, trigger_activities, grove_id, created_by
+			FROM subscription_templates
+			WHERE grove_id = '' OR grove_id = ?
+			ORDER BY grove_id ASC, name ASC
+		`, groveID)
+	} else {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT id, name, scope, trigger_activities, grove_id, created_by
+			FROM subscription_templates
+			WHERE grove_id = ''
+			ORDER BY name ASC
+		`)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var templates []store.SubscriptionTemplate
+	for rows.Next() {
+		var tmpl store.SubscriptionTemplate
+		var triggersJSON string
+		if err := rows.Scan(&tmpl.ID, &tmpl.Name, &tmpl.Scope, &triggersJSON, &tmpl.GroveID, &tmpl.CreatedBy); err != nil {
+			return nil, err
+		}
+		unmarshalJSON(triggersJSON, &tmpl.TriggerActivities)
+		templates = append(templates, tmpl)
+	}
+	return templates, rows.Err()
+}
+
+// DeleteSubscriptionTemplate deletes a template by ID.
+func (s *SQLiteStore) DeleteSubscriptionTemplate(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM subscription_templates WHERE id = ?
+	`, id)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return store.ErrNotFound
+	}
+	return nil
 }
 
 // ============================================================================

@@ -131,6 +131,8 @@ func newChannelFromConfig(cfg ChannelConfig) (NotificationChannel, error) {
 		return NewWebhookChannel(cfg.Params), nil
 	case "slack":
 		return NewSlackChannel(cfg.Params), nil
+	case "email":
+		return NewEmailChannel(cfg.Params), nil
 	default:
 		return nil, fmt.Errorf("unknown notification channel type: %q", cfg.Type)
 	}

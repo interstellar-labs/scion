@@ -15,6 +15,7 @@
 package hub
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -86,7 +87,10 @@ type agentNotificationsResponse struct {
 //   - POST /api/v1/notifications/{id}/ack: Acknowledge a single notification
 //   - POST /api/v1/notifications/subscriptions: Create a subscription
 //   - GET  /api/v1/notifications/subscriptions: List subscriptions for caller
+//   - PATCH /api/v1/notifications/subscriptions/{id}: Update trigger activities
 //   - DELETE /api/v1/notifications/subscriptions/{id}: Delete a subscription
+//   - POST /api/v1/notifications/subscriptions/bulk: Bulk create subscriptions
+//   - POST /api/v1/notifications/subscriptions/bulk-delete: Bulk delete subscriptions
 func (s *Server) handleNotificationRoutes(w http.ResponseWriter, r *http.Request) {
 	user := GetUserIdentityFromContext(r.Context())
 	if user == nil {
@@ -110,6 +114,12 @@ func (s *Server) handleNotificationRoutes(w http.ResponseWriter, r *http.Request
 	// Subscription routes: /api/v1/notifications/subscriptions[/...]
 	if id == "subscriptions" {
 		s.handleSubscriptionRoutes(w, r, user, action)
+		return
+	}
+
+	// Subscription template routes: /api/v1/notifications/templates[/...]
+	if id == "templates" {
+		s.handleSubscriptionTemplateRoutes(w, r, user, action)
 		return
 	}
 
@@ -137,6 +147,11 @@ type createSubscriptionRequest struct {
 	Scope             string   `json:"scope"`
 	AgentID           string   `json:"agentId,omitempty"`
 	GroveID           string   `json:"groveId"`
+	TriggerActivities []string `json:"triggerActivities"`
+}
+
+// updateSubscriptionRequest is the request body for PATCH /api/v1/notifications/subscriptions/{id}.
+type updateSubscriptionRequest struct {
 	TriggerActivities []string `json:"triggerActivities"`
 }
 
@@ -173,6 +188,20 @@ func (s *Server) handleSubscriptionRoutes(w http.ResponseWriter, r *http.Request
 		if len(req.TriggerActivities) == 0 {
 			writeError(w, http.StatusBadRequest, "bad_request", "triggerActivities must be non-empty", nil)
 			return
+		}
+
+		// Enforce subscription limit if configured
+		if s.config.MaxSubscriptionsPerUser > 0 {
+			existing, err := s.store.GetSubscriptionsForSubscriber(ctx, store.SubscriberTypeUser, user.ID())
+			if err != nil {
+				writeErrorFromErr(w, err, "")
+				return
+			}
+			if len(existing) >= s.config.MaxSubscriptionsPerUser {
+				writeError(w, http.StatusConflict, "limit_exceeded",
+					fmt.Sprintf("Maximum subscription limit reached (%d)", s.config.MaxSubscriptionsPerUser), nil)
+				return
+			}
 		}
 
 		sub := &store.NotificationSubscription{
@@ -238,6 +267,40 @@ func (s *Server) handleSubscriptionRoutes(w http.ResponseWriter, r *http.Request
 
 		writeJSON(w, http.StatusOK, filtered)
 
+	// PATCH /api/v1/notifications/subscriptions/{id} — Update trigger activities
+	case subID != "" && r.Method == http.MethodPatch:
+		// Verify ownership
+		sub, err := s.store.GetNotificationSubscription(ctx, subID)
+		if err != nil {
+			writeErrorFromErr(w, err, "Subscription")
+			return
+		}
+		if sub.SubscriberType != store.SubscriberTypeUser || sub.SubscriberID != user.ID() {
+			Forbidden(w)
+			return
+		}
+
+		var req updateSubscriptionRequest
+		if err := readJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body", nil)
+			return
+		}
+		if len(req.TriggerActivities) == 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "triggerActivities must be non-empty", nil)
+			return
+		}
+
+		if err := s.store.UpdateNotificationSubscriptionTriggers(ctx, subID, req.TriggerActivities); err != nil {
+			writeErrorFromErr(w, err, "Subscription")
+			return
+		}
+
+		// Return the updated subscription
+		sub.TriggerActivities = req.TriggerActivities
+		slog.Info("Subscription updated",
+			"subscriptionID", subID, "userID", user.ID())
+		writeJSON(w, http.StatusOK, sub)
+
 	// DELETE /api/v1/notifications/subscriptions/{id} — Delete
 	case subID != "" && r.Method == http.MethodDelete:
 		// Verify ownership before deleting
@@ -258,6 +321,201 @@ func (s *Server) handleSubscriptionRoutes(w http.ResponseWriter, r *http.Request
 
 		slog.Info("Subscription deleted",
 			"subscriptionID", subID, "userID", user.ID())
+		w.WriteHeader(http.StatusNoContent)
+
+	// POST /api/v1/notifications/subscriptions/bulk — Bulk create
+	case subID == "bulk" && r.Method == http.MethodPost:
+		var reqs []createSubscriptionRequest
+		if err := readJSON(r, &reqs); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Expected JSON array of subscription requests", nil)
+			return
+		}
+		if len(reqs) == 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "Empty request array", nil)
+			return
+		}
+
+		// Enforce subscription limit if configured
+		if s.config.MaxSubscriptionsPerUser > 0 {
+			existing, err := s.store.GetSubscriptionsForSubscriber(ctx, store.SubscriberTypeUser, user.ID())
+			if err != nil {
+				writeErrorFromErr(w, err, "")
+				return
+			}
+			if len(existing)+len(reqs) > s.config.MaxSubscriptionsPerUser {
+				writeError(w, http.StatusConflict, "limit_exceeded",
+					fmt.Sprintf("Bulk create would exceed subscription limit (%d)", s.config.MaxSubscriptionsPerUser), nil)
+				return
+			}
+		}
+
+		var results []store.NotificationSubscription
+		for _, req := range reqs {
+			if req.Scope != store.SubscriptionScopeAgent && req.Scope != store.SubscriptionScopeGrove {
+				continue
+			}
+			if req.GroveID == "" || len(req.TriggerActivities) == 0 {
+				continue
+			}
+			if req.Scope == store.SubscriptionScopeAgent && req.AgentID == "" {
+				continue
+			}
+
+			sub := &store.NotificationSubscription{
+				ID:                api.NewUUID(),
+				Scope:             req.Scope,
+				AgentID:           req.AgentID,
+				SubscriberType:    store.SubscriberTypeUser,
+				SubscriberID:      user.ID(),
+				GroveID:           req.GroveID,
+				TriggerActivities: req.TriggerActivities,
+				CreatedBy:         user.ID(),
+			}
+
+			if err := s.store.CreateNotificationSubscription(ctx, sub); err != nil {
+				if err == store.ErrAlreadyExists {
+					// Idempotent: find and return existing
+					existing, listErr := s.store.GetSubscriptionsForSubscriber(ctx, store.SubscriberTypeUser, user.ID())
+					if listErr == nil {
+						for _, e := range existing {
+							if e.Scope == req.Scope && e.AgentID == req.AgentID && e.GroveID == req.GroveID {
+								results = append(results, e)
+								break
+							}
+						}
+					}
+					continue
+				}
+				// Skip failed items, continue with the rest
+				slog.Warn("Bulk subscription creation failed for item", "error", err)
+				continue
+			}
+			results = append(results, *sub)
+		}
+
+		slog.Info("Bulk subscriptions created",
+			"count", len(results), "userID", user.ID())
+		writeJSON(w, http.StatusCreated, results)
+
+	// POST /api/v1/notifications/subscriptions/bulk-delete — Bulk delete
+	case subID == "bulk-delete" && r.Method == http.MethodPost:
+		var req struct {
+			IDs []string `json:"ids"`
+		}
+		if err := readJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Expected JSON with 'ids' array", nil)
+			return
+		}
+		if len(req.IDs) == 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "ids must be non-empty", nil)
+			return
+		}
+
+		deleted := 0
+		for _, id := range req.IDs {
+			sub, err := s.store.GetNotificationSubscription(ctx, id)
+			if err != nil {
+				continue
+			}
+			if sub.SubscriberType != store.SubscriberTypeUser || sub.SubscriberID != user.ID() {
+				continue
+			}
+			if err := s.store.DeleteNotificationSubscription(ctx, id); err != nil {
+				continue
+			}
+			deleted++
+		}
+
+		slog.Info("Bulk subscriptions deleted",
+			"deleted", deleted, "requested", len(req.IDs), "userID", user.ID())
+		writeJSON(w, http.StatusOK, map[string]int{"deleted": deleted})
+
+	default:
+		MethodNotAllowed(w)
+	}
+}
+
+// createTemplateRequest is the request body for POST /api/v1/notifications/templates.
+type createTemplateRequest struct {
+	Name              string   `json:"name"`
+	Scope             string   `json:"scope"`
+	TriggerActivities []string `json:"triggerActivities"`
+	GroveID           string   `json:"groveId"`
+}
+
+// handleSubscriptionTemplateRoutes handles CRUD for subscription templates.
+func (s *Server) handleSubscriptionTemplateRoutes(w http.ResponseWriter, r *http.Request, user UserIdentity, templateID string) {
+	ctx := r.Context()
+
+	switch {
+	// POST /api/v1/notifications/templates — Create
+	case templateID == "" && r.Method == http.MethodPost:
+		var req createTemplateRequest
+		if err := readJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body", nil)
+			return
+		}
+		if req.Name == "" {
+			writeError(w, http.StatusBadRequest, "bad_request", "name is required", nil)
+			return
+		}
+		if len(req.TriggerActivities) == 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "triggerActivities must be non-empty", nil)
+			return
+		}
+		if req.Scope == "" {
+			req.Scope = store.SubscriptionScopeGrove
+		}
+
+		tmpl := &store.SubscriptionTemplate{
+			ID:                api.NewUUID(),
+			Name:              req.Name,
+			Scope:             req.Scope,
+			TriggerActivities: req.TriggerActivities,
+			GroveID:           req.GroveID,
+			CreatedBy:         user.ID(),
+		}
+
+		if err := s.store.CreateSubscriptionTemplate(ctx, tmpl); err != nil {
+			if err == store.ErrAlreadyExists {
+				writeError(w, http.StatusConflict, "already_exists", "A template with that name already exists in this grove", nil)
+				return
+			}
+			writeErrorFromErr(w, err, "")
+			return
+		}
+
+		slog.Info("Subscription template created",
+			"templateID", tmpl.ID, "name", tmpl.Name, "userID", user.ID())
+		writeJSON(w, http.StatusCreated, tmpl)
+
+	// GET /api/v1/notifications/templates — List
+	case templateID == "" && r.Method == http.MethodGet:
+		groveID := r.URL.Query().Get("groveId")
+		templates, err := s.store.ListSubscriptionTemplates(ctx, groveID)
+		if err != nil {
+			writeErrorFromErr(w, err, "")
+			return
+		}
+		writeJSON(w, http.StatusOK, templates)
+
+	// DELETE /api/v1/notifications/templates/{id} — Delete
+	case templateID != "" && r.Method == http.MethodDelete:
+		tmpl, err := s.store.GetSubscriptionTemplate(ctx, templateID)
+		if err != nil {
+			writeErrorFromErr(w, err, "Template")
+			return
+		}
+		if tmpl.CreatedBy != user.ID() {
+			Forbidden(w)
+			return
+		}
+		if err := s.store.DeleteSubscriptionTemplate(ctx, templateID); err != nil {
+			writeErrorFromErr(w, err, "Template")
+			return
+		}
+		slog.Info("Subscription template deleted",
+			"templateID", templateID, "userID", user.ID())
 		w.WriteHeader(http.StatusNoContent)
 
 	default:

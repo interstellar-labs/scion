@@ -545,6 +545,17 @@ func (s *NotificationSubscription) MatchesActivity(activity string) bool {
 	return false
 }
 
+// SubscriptionTemplate represents a pre-configured set of trigger activities
+// that can be used as a shortcut when creating subscriptions.
+type SubscriptionTemplate struct {
+	ID                string   `json:"id"`                // UUID primary key
+	Name              string   `json:"name"`              // Display name (e.g., "All Events", "Critical Only")
+	Scope             string   `json:"scope"`             // Default scope: "agent" or "grove"
+	TriggerActivities []string `json:"triggerActivities"` // Pre-configured trigger set
+	GroveID           string   `json:"groveId"`           // Grove scope (empty = global)
+	CreatedBy         string   `json:"createdBy"`
+}
+
 // Notification represents a notification record generated from a subscription match.
 type Notification struct {
 	ID             string    `json:"id"`             // UUID primary key

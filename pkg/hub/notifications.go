@@ -57,21 +57,28 @@ func NewNotificationDispatcher(s store.Store, events *ChannelEventPublisher, get
 	}
 }
 
-// Start subscribes to agent status events and spawns a goroutine to process them.
+// Start subscribes to agent status and deletion events and spawns goroutines to process them.
 func (nd *NotificationDispatcher) Start() {
-	ch, unsubscribe := nd.events.Subscribe("grove.>.agent.status")
+	statusCh, unsubStatus := nd.events.Subscribe("grove.>.agent.status")
+	deletedCh, unsubDeleted := nd.events.Subscribe("grove.>.agent.deleted")
 
 	nd.wg.Add(1)
 	go func() {
 		defer nd.wg.Done()
-		defer unsubscribe()
+		defer unsubStatus()
+		defer unsubDeleted()
 		for {
 			select {
-			case evt, ok := <-ch:
+			case evt, ok := <-statusCh:
 				if !ok {
 					return
 				}
 				nd.handleEvent(evt)
+			case evt, ok := <-deletedCh:
+				if !ok {
+					return
+				}
+				nd.handleDeletedEvent(evt)
 			case <-nd.stopCh:
 				return
 			}
@@ -165,6 +172,67 @@ func (nd *NotificationDispatcher) handleEvent(evt Event) {
 		}
 
 		seen[dedupeKey] = true
+		nd.storeAndDispatch(ctx, sub, statusEvt)
+	}
+}
+
+// handleDeletedEvent processes an agent deletion event.
+// It fires DELETED notifications before the cascade delete removes subscriptions.
+func (nd *NotificationDispatcher) handleDeletedEvent(evt Event) {
+	var deletedEvt AgentDeletedEvent
+	if err := json.Unmarshal(evt.Data, &deletedEvt); err != nil {
+		nd.log.Error("Failed to unmarshal agent deleted event", "error", err)
+		return
+	}
+
+	ctx := context.Background()
+
+	nd.log.Debug("Notification dispatcher received deleted event",
+		"agentID", deletedEvt.AgentID, "groveID", deletedEvt.GroveID)
+
+	// Collect subscriptions from both scopes
+	agentSubs, err := nd.store.GetNotificationSubscriptions(ctx, deletedEvt.AgentID)
+	if err != nil {
+		nd.log.Error("Failed to get agent notification subscriptions for deleted event",
+			"agentID", deletedEvt.AgentID, "error", err)
+		agentSubs = nil
+	}
+
+	groveSubs, err := nd.store.GetNotificationSubscriptionsByGroveScope(ctx, deletedEvt.GroveID)
+	if err != nil {
+		nd.log.Error("Failed to get grove notification subscriptions for deleted event",
+			"groveID", deletedEvt.GroveID, "error", err)
+		groveSubs = nil
+	}
+
+	allSubs := append(agentSubs, groveSubs...)
+	if len(allSubs) == 0 {
+		return
+	}
+
+	// Deduplicate by subscriber and fire DELETED notifications
+	seen := make(map[string]bool)
+	for i := range allSubs {
+		sub := &allSubs[i]
+
+		dedupeKey := sub.SubscriberType + ":" + sub.SubscriberID
+		if seen[dedupeKey] {
+			continue
+		}
+
+		if !sub.MatchesActivity("DELETED") {
+			continue
+		}
+
+		seen[dedupeKey] = true
+
+		// Build a synthetic status event for storeAndDispatch
+		statusEvt := AgentStatusEvent{
+			AgentID:  deletedEvt.AgentID,
+			GroveID:  deletedEvt.GroveID,
+			Phase:    "stopped",
+			Activity: "DELETED",
+		}
 		nd.storeAndDispatch(ctx, sub, statusEvt)
 	}
 }
@@ -350,6 +418,8 @@ func formatNotificationMessage(agent *store.Agent, status string) string {
 			msg += ": " + agent.Message
 		}
 		return msg
+	case "DELETED":
+		return fmt.Sprintf("%s has been DELETED", agent.Slug)
 	default:
 		return fmt.Sprintf("%s has reached status: %s", agent.Slug, upper)
 	}

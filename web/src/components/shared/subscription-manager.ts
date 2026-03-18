@@ -28,8 +28,17 @@ import { apiFetch } from '../../client/api.js';
 import { resourceStyles } from './resource-styles.js';
 import type { Subscription, SubscriptionScope } from '../../shared/types.js';
 
+interface SubscriptionTemplate {
+  id: string;
+  name: string;
+  scope: string;
+  triggerActivities: string[];
+  groveId: string;
+  createdBy: string;
+}
+
 const DEFAULT_TRIGGERS = ['COMPLETED', 'WAITING_FOR_INPUT', 'LIMITS_EXCEEDED'];
-const ALL_TRIGGERS = ['COMPLETED', 'WAITING_FOR_INPUT', 'LIMITS_EXCEEDED'];
+const ALL_TRIGGERS = ['COMPLETED', 'WAITING_FOR_INPUT', 'LIMITS_EXCEEDED', 'DELETED'];
 
 @customElement('scion-subscription-manager')
 export class ScionSubscriptionManager extends LitElement {
@@ -41,6 +50,9 @@ export class ScionSubscriptionManager extends LitElement {
   @state() private subscriptions: Subscription[] = [];
   @state() private error: string | null = null;
 
+  // Templates
+  @state() private templates: SubscriptionTemplate[] = [];
+
   // Create dialog
   @state() private dialogOpen = false;
   @state() private dialogScope: SubscriptionScope = 'grove';
@@ -48,6 +60,11 @@ export class ScionSubscriptionManager extends LitElement {
   @state() private dialogTriggers: Set<string> = new Set(DEFAULT_TRIGGERS);
   @state() private dialogLoading = false;
   @state() private dialogError: string | null = null;
+
+  // Edit state
+  @state() private editingId: string | null = null;
+  @state() private editTriggers: Set<string> = new Set();
+  @state() private editLoading = false;
 
   // Delete state
   @state() private deletingId: string | null = null;
@@ -57,6 +74,7 @@ export class ScionSubscriptionManager extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     void this.loadSubscriptions();
+    void this.loadTemplates();
   }
 
   private async loadSubscriptions(): Promise<void> {
@@ -86,6 +104,25 @@ export class ScionSubscriptionManager extends LitElement {
     } finally {
       this.loading = false;
     }
+  }
+
+  private async loadTemplates(): Promise<void> {
+    if (!this.groveId) return;
+    try {
+      const url = `/api/v1/notifications/templates?groveId=${encodeURIComponent(this.groveId)}`;
+      const response = await apiFetch(url);
+      if (response.ok) {
+        const data = (await response.json()) as SubscriptionTemplate[] | null;
+        this.templates = data || [];
+      }
+    } catch {
+      // Templates are optional; silently ignore load failures
+    }
+  }
+
+  private applyTemplate(tmpl: SubscriptionTemplate): void {
+    this.dialogScope = tmpl.scope as SubscriptionScope;
+    this.dialogTriggers = new Set(tmpl.triggerActivities);
   }
 
   private openCreateDialog(): void {
@@ -142,6 +179,45 @@ export class ScionSubscriptionManager extends LitElement {
       this.dialogError = err instanceof Error ? err.message : 'Failed to create subscription';
     } finally {
       this.dialogLoading = false;
+    }
+  }
+
+  private startEdit(sub: Subscription): void {
+    this.editingId = sub.id;
+    this.editTriggers = new Set(sub.triggerActivities || DEFAULT_TRIGGERS);
+  }
+
+  private cancelEdit(): void {
+    this.editingId = null;
+    this.editTriggers = new Set();
+  }
+
+  private async saveEdit(): Promise<void> {
+    if (!this.editingId || this.editTriggers.size === 0) return;
+    this.editLoading = true;
+
+    try {
+      const response = await apiFetch(
+        `/api/v1/notifications/subscriptions/${encodeURIComponent(this.editingId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ triggerActivities: [...this.editTriggers] }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
+        throw new Error(errorData.message || `HTTP ${response.status}`);
+      }
+
+      this.editingId = null;
+      await this.loadSubscriptions();
+    } catch (err) {
+      console.error('Failed to update subscription:', err);
+      this.error = err instanceof Error ? err.message : 'Failed to update subscription';
+    } finally {
+      this.editLoading = false;
     }
   }
 
@@ -313,6 +389,7 @@ export class ScionSubscriptionManager extends LitElement {
 
   private renderRow(sub: Subscription) {
     const isDeleting = this.deletingId === sub.id;
+    const isEditing = this.editingId === sub.id;
     const target =
       sub.scope === 'grove' ? '(all agents)' : sub.agentId || '\u2014';
     const scopeIcon = sub.scope === 'grove' ? 'folder' : 'cpu';
@@ -327,17 +404,68 @@ export class ScionSubscriptionManager extends LitElement {
           </span>
         </td>
         <td><span class="meta-text">${target}</span></td>
-        <td class="hide-mobile"><span class="meta-text">${triggers}</span></td>
+        <td class="hide-mobile">
+          ${isEditing
+            ? html`
+                <div class="inline-edit-triggers">
+                  ${ALL_TRIGGERS.map(
+                    (trigger) => html`
+                      <label class="checkbox-label compact">
+                        <input
+                          type="checkbox"
+                          .checked=${this.editTriggers.has(trigger)}
+                          @change=${(e: Event) => {
+                            const checked = (e.target as HTMLInputElement).checked;
+                            const next = new Set(this.editTriggers);
+                            if (checked) {
+                              next.add(trigger);
+                            } else {
+                              next.delete(trigger);
+                            }
+                            this.editTriggers = next;
+                          }}
+                        />
+                        <span>${this.triggerLabel(trigger)}</span>
+                      </label>
+                    `
+                  )}
+                </div>
+              `
+            : html`<span class="meta-text">${triggers}</span>`}
+        </td>
         <td class="hide-mobile">
           <span class="meta-text">${this.formatRelativeTime(sub.createdAt)}</span>
         </td>
         <td class="actions-cell">
-          <sl-icon-button
-            name="trash"
-            label="Delete"
-            ?disabled=${isDeleting}
-            @click=${() => this.handleDelete(sub.id)}
-          ></sl-icon-button>
+          ${isEditing
+            ? html`
+                <sl-icon-button
+                  name="check-lg"
+                  label="Save"
+                  ?disabled=${this.editLoading || this.editTriggers.size === 0}
+                  @click=${() => this.saveEdit()}
+                ></sl-icon-button>
+                <sl-icon-button
+                  name="x-lg"
+                  label="Cancel"
+                  ?disabled=${this.editLoading}
+                  @click=${() => this.cancelEdit()}
+                ></sl-icon-button>
+              `
+            : html`
+                <sl-icon-button
+                  name="pencil"
+                  label="Edit"
+                  ?disabled=${isDeleting}
+                  @click=${() => this.startEdit(sub)}
+                ></sl-icon-button>
+                <sl-icon-button
+                  name="trash"
+                  label="Delete"
+                  ?disabled=${isDeleting}
+                  @click=${() => this.handleDelete(sub.id)}
+                ></sl-icon-button>
+              `}
         </td>
       </tr>
     `;
@@ -386,6 +514,30 @@ export class ScionSubscriptionManager extends LitElement {
                     (this.dialogAgentId = (e.target as HTMLInputElement).value)}
                   required
                 ></sl-input>
+              `
+            : nothing}
+
+          ${this.templates.length > 0
+            ? html`
+                <div class="radio-field">
+                  <span class="radio-field-label">Template</span>
+                  <sl-select
+                    placeholder="Choose a template (optional)"
+                    size="small"
+                    clearable
+                    @sl-change=${(e: Event) => {
+                      const id = (e.target as HTMLSelectElement).value;
+                      const tmpl = this.templates.find((t) => t.id === id);
+                      if (tmpl) this.applyTemplate(tmpl);
+                    }}
+                  >
+                    ${this.templates.map(
+                      (tmpl) => html`
+                        <sl-option value=${tmpl.id}>${tmpl.name}</sl-option>
+                      `
+                    )}
+                  </sl-select>
+                </div>
               `
             : nothing}
 
@@ -440,6 +592,8 @@ export class ScionSubscriptionManager extends LitElement {
         return 'Waiting for Input';
       case 'LIMITS_EXCEEDED':
         return 'Limits Exceeded';
+      case 'DELETED':
+        return 'Deleted';
       default:
         return trigger;
     }
@@ -453,6 +607,8 @@ export class ScionSubscriptionManager extends LitElement {
         return 'Agent needs human input to continue.';
       case 'LIMITS_EXCEEDED':
         return 'Agent exceeded turn or model call limits.';
+      case 'DELETED':
+        return 'Agent was deleted.';
       default:
         return '';
     }

@@ -107,6 +107,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		migrationV30,
 		migrationV31,
 		migrationV32,
+		migrationV33,
 	}
 
 	// Create migrations table if not exists
@@ -785,6 +786,20 @@ CREATE INDEX IF NOT EXISTS idx_schedules_grove ON schedules(grove_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_next_run ON schedules(next_run_at) WHERE status = 'active';
 
 ALTER TABLE scheduled_events ADD COLUMN schedule_id TEXT DEFAULT '';
+`
+
+// Migration V33: Subscription templates table.
+const migrationV33 = `
+CREATE TABLE IF NOT EXISTS subscription_templates (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	scope TEXT NOT NULL DEFAULT 'grove',
+	trigger_activities TEXT NOT NULL,
+	grove_id TEXT NOT NULL DEFAULT '',
+	created_by TEXT NOT NULL,
+	UNIQUE(grove_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_sub_templates_grove ON subscription_templates(grove_id);
 `
 
 // Helper functions for JSON marshaling/unmarshaling

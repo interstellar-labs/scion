@@ -106,8 +106,17 @@ type SubscriptionService interface {
 	// List returns subscriptions for the current user.
 	List(ctx context.Context, opts *ListSubscriptionsOptions) ([]Subscription, error)
 
+	// Update modifies the trigger activities of a subscription.
+	Update(ctx context.Context, id string, req *UpdateSubscriptionRequest) (*Subscription, error)
+
 	// Delete removes a subscription by ID.
 	Delete(ctx context.Context, id string) error
+
+	// BulkCreate creates multiple subscriptions in a single request.
+	BulkCreate(ctx context.Context, reqs []CreateSubscriptionRequest) ([]Subscription, error)
+
+	// BulkDelete removes multiple subscriptions by ID in a single request.
+	BulkDelete(ctx context.Context, ids []string) (int, error)
 }
 
 // subscriptionService is the implementation of SubscriptionService.
@@ -120,6 +129,11 @@ type CreateSubscriptionRequest struct {
 	Scope             string   `json:"scope"`
 	AgentID           string   `json:"agentId,omitempty"`
 	GroveID           string   `json:"groveId"`
+	TriggerActivities []string `json:"triggerActivities"`
+}
+
+// UpdateSubscriptionRequest is the request body for updating a subscription.
+type UpdateSubscriptionRequest struct {
 	TriggerActivities []string `json:"triggerActivities"`
 }
 
@@ -181,6 +195,15 @@ func (s *subscriptionService) List(ctx context.Context, opts *ListSubscriptionsO
 	return *result, nil
 }
 
+// Update modifies the trigger activities of a subscription.
+func (s *subscriptionService) Update(ctx context.Context, id string, req *UpdateSubscriptionRequest) (*Subscription, error) {
+	resp, err := s.c.transport.Patch(ctx, "/api/v1/notifications/subscriptions/"+url.PathEscape(id), req, nil)
+	if err != nil {
+		return nil, err
+	}
+	return apiclient.DecodeResponse[Subscription](resp)
+}
+
 // Delete removes a subscription by ID.
 func (s *subscriptionService) Delete(ctx context.Context, id string) error {
 	resp, err := s.c.transport.Delete(ctx, "/api/v1/notifications/subscriptions/"+url.PathEscape(id), nil)
@@ -188,4 +211,111 @@ func (s *subscriptionService) Delete(ctx context.Context, id string) error {
 		return err
 	}
 	return apiclient.CheckResponse(resp)
+}
+
+// BulkCreate creates multiple subscriptions in a single request.
+func (s *subscriptionService) BulkCreate(ctx context.Context, reqs []CreateSubscriptionRequest) ([]Subscription, error) {
+	resp, err := s.c.transport.Post(ctx, "/api/v1/notifications/subscriptions/bulk", reqs, nil)
+	if err != nil {
+		return nil, err
+	}
+	result, err := apiclient.DecodeResponse[[]Subscription](resp)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return []Subscription{}, nil
+	}
+	return *result, nil
+}
+
+// SubscriptionTemplateService handles subscription template operations.
+type SubscriptionTemplateService interface {
+	// Create creates a new subscription template.
+	Create(ctx context.Context, req *CreateSubscriptionTemplateRequest) (*SubscriptionTemplate, error)
+
+	// List returns subscription templates, optionally filtered by grove.
+	List(ctx context.Context, groveID string) ([]SubscriptionTemplate, error)
+
+	// Delete removes a template by ID.
+	Delete(ctx context.Context, id string) error
+}
+
+// subscriptionTemplateService is the implementation of SubscriptionTemplateService.
+type subscriptionTemplateService struct {
+	c *client
+}
+
+// CreateSubscriptionTemplateRequest is the request body for creating a subscription template.
+type CreateSubscriptionTemplateRequest struct {
+	Name              string   `json:"name"`
+	Scope             string   `json:"scope"`
+	TriggerActivities []string `json:"triggerActivities"`
+	GroveID           string   `json:"groveId"`
+}
+
+// SubscriptionTemplate represents a subscription template from the Hub API.
+type SubscriptionTemplate struct {
+	ID                string   `json:"id"`
+	Name              string   `json:"name"`
+	Scope             string   `json:"scope"`
+	TriggerActivities []string `json:"triggerActivities"`
+	GroveID           string   `json:"groveId"`
+	CreatedBy         string   `json:"createdBy"`
+}
+
+// Create creates a new subscription template.
+func (s *subscriptionTemplateService) Create(ctx context.Context, req *CreateSubscriptionTemplateRequest) (*SubscriptionTemplate, error) {
+	resp, err := s.c.transport.Post(ctx, "/api/v1/notifications/templates", req, nil)
+	if err != nil {
+		return nil, err
+	}
+	return apiclient.DecodeResponse[SubscriptionTemplate](resp)
+}
+
+// List returns subscription templates, optionally filtered by grove.
+func (s *subscriptionTemplateService) List(ctx context.Context, groveID string) ([]SubscriptionTemplate, error) {
+	query := url.Values{}
+	if groveID != "" {
+		query.Set("groveId", groveID)
+	}
+	resp, err := s.c.transport.GetWithQuery(ctx, "/api/v1/notifications/templates", query, nil)
+	if err != nil {
+		return nil, err
+	}
+	result, err := apiclient.DecodeResponse[[]SubscriptionTemplate](resp)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return []SubscriptionTemplate{}, nil
+	}
+	return *result, nil
+}
+
+// Delete removes a template by ID.
+func (s *subscriptionTemplateService) Delete(ctx context.Context, id string) error {
+	resp, err := s.c.transport.Delete(ctx, "/api/v1/notifications/templates/"+url.PathEscape(id), nil)
+	if err != nil {
+		return err
+	}
+	return apiclient.CheckResponse(resp)
+}
+
+// BulkDelete removes multiple subscriptions by ID in a single request.
+func (s *subscriptionService) BulkDelete(ctx context.Context, ids []string) (int, error) {
+	body := struct {
+		IDs []string `json:"ids"`
+	}{IDs: ids}
+	resp, err := s.c.transport.Post(ctx, "/api/v1/notifications/subscriptions/bulk-delete", body, nil)
+	if err != nil {
+		return 0, err
+	}
+	result, err := apiclient.DecodeResponse[struct {
+		Deleted int `json:"deleted"`
+	}](resp)
+	if err != nil {
+		return 0, err
+	}
+	return result.Deleted, nil
 }

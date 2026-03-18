@@ -105,6 +105,9 @@ type ServerConfig struct {
 	// TelemetryDefault is the default telemetry enabled state for new agents.
 	// Exposed via GET /api/v1/settings/public so the web UI can pre-populate the checkbox.
 	TelemetryDefault *bool
+	// MaxSubscriptionsPerUser is the maximum number of notification subscriptions
+	// allowed per subscriber. Zero means unlimited (default).
+	MaxSubscriptionsPerUser int
 }
 
 // DefaultServerConfig returns the default server configuration.
