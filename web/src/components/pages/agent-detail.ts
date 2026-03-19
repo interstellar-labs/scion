@@ -1279,14 +1279,14 @@ export class ScionPageAgentDetail extends LitElement {
     const inline = cfg?.inlineConfig;
 
     return html`
-      ${this.renderIdentityCard(agent)} ${this.renderHarnessModelCard(agent, cfg, inline)}
+      ${this.renderIdentityCard(agent, cfg?.gcpIdentity)} ${this.renderHarnessModelCard(agent, cfg, inline)}
       ${this.renderRuntimeCard(agent, inline)} ${this.renderGCPIdentityCard(cfg?.gcpIdentity)}
       ${this.renderConfigLimitsCard(inline)} ${this.renderTelemetryCard(inline?.telemetry)}
       ${this.renderInitialTaskCard(cfg)}
     `;
   }
 
-  private renderIdentityCard(agent: Agent) {
+  private renderIdentityCard(agent: Agent, gcpIdentity?: GCPIdentityConfig) {
     return html`
       <div class="card">
         <h3 class="card-title">Identity</h3>
@@ -1324,6 +1324,22 @@ export class ScionPageAgentDetail extends LitElement {
                   <span class="info-value">
                     <span class="visibility-badge">${agent.visibility}</span>
                   </span>
+                </div>
+              `
+            : ''}
+          ${gcpIdentity?.metadataMode === 'assign' && gcpIdentity.serviceAccountEmail
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">GCP Service Account</span>
+                  <span class="info-value mono">${gcpIdentity.serviceAccountEmail}</span>
+                </div>
+              `
+            : ''}
+          ${gcpIdentity?.metadataMode === 'assign' && gcpIdentity.projectId
+            ? html`
+                <div class="info-item">
+                  <span class="info-label">GCP Project</span>
+                  <span class="info-value mono">${gcpIdentity.projectId}</span>
                 </div>
               `
             : ''}
@@ -1476,22 +1492,6 @@ export class ScionPageAgentDetail extends LitElement {
               <sl-badge variant=${modeVariant}>${gcpIdentity.metadataMode}</sl-badge>
             </span>
           </div>
-          ${gcpIdentity.metadataMode === 'assign' && gcpIdentity.serviceAccountEmail
-            ? html`
-                <div class="info-item">
-                  <span class="info-label">Service Account</span>
-                  <span class="info-value mono">${gcpIdentity.serviceAccountEmail}</span>
-                </div>
-              `
-            : ''}
-          ${gcpIdentity.metadataMode === 'assign' && gcpIdentity.projectId
-            ? html`
-                <div class="info-item">
-                  <span class="info-label">GCP Project</span>
-                  <span class="info-value mono">${gcpIdentity.projectId}</span>
-                </div>
-              `
-            : ''}
         </div>
       </div>
     `;
