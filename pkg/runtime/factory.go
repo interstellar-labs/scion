@@ -125,8 +125,8 @@ func GetRuntime(grovePath string, profileName string) Runtime {
 		}
 		rt.GKEMode = rtConfig.GKE
 		if !rt.GKEMode && k8sClient.IsGKE() {
-			rt.GKEMode = true
-			util.Debugf("GetRuntime: auto-detected GKE cluster, enabling GKE mode")
+			rt.GKEAutoDetected = true
+			util.Debugf("GetRuntime: auto-detected GKE cluster, enabling Autopilot scheduling tolerance")
 		}
 		rt.ListAllNamespaces = rtConfig.ListAllNamespaces
 		return rt

@@ -45,7 +45,8 @@ import (
 type KubernetesRuntime struct {
 	Client            *k8s.Client
 	DefaultNamespace  string
-	GKEMode           bool
+	GKEMode           bool // Enables GKE-specific features (SecretProviderClass CSI, GCS FUSE)
+	GKEAutoDetected   bool // True when GKE was auto-detected (enables Autopilot tolerance only)
 	ListAllNamespaces bool // When true, List() queries all namespaces for scion pods
 }
 
@@ -54,6 +55,12 @@ func NewKubernetesRuntime(client *k8s.Client) *KubernetesRuntime {
 		Client:           client,
 		DefaultNamespace: "default",
 	}
+}
+
+// isGKEScheduling returns true when GKE Autopilot scheduling tolerance
+// should be applied — either via explicit GKEMode or auto-detection.
+func (r *KubernetesRuntime) isGKEScheduling() bool {
+	return r.GKEMode || r.GKEAutoDetected
 }
 
 func (r *KubernetesRuntime) Name() string {
@@ -1226,7 +1233,7 @@ func (r *KubernetesRuntime) waitForPodReady(ctx context.Context, namespace, podN
 					runtimeLog.Error("Container crash loop", "pod", podName, "message", message, "phase", "crash-loop")
 					return fmt.Errorf("container is crash-looping in pod %q: %s — check container logs with 'scion logs'", podName, message)
 				case "Unschedulable":
-					if r.GKEMode {
+					if r.isGKEScheduling() {
 						runtimeLog.Info("Pod unschedulable (GKE Autopilot will auto-provision nodes)", "pod", podName, "message", message, "phase", "scheduling")
 					} else {
 						runtimeLog.Error("Pod unschedulable", "pod", podName, "message", message, "phase", "scheduling")
@@ -1238,7 +1245,7 @@ func (r *KubernetesRuntime) waitForPodReady(ctx context.Context, namespace, podN
 			// Check pod-level conditions for scheduling failures
 			for _, cond := range pod.Status.Conditions {
 				if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionFalse && cond.Reason == "Unschedulable" {
-					if r.GKEMode {
+					if r.isGKEScheduling() {
 						// On GKE Autopilot, Unschedulable is transient — the cluster
 						// will auto-provision nodes. Continue waiting instead of failing.
 						if !autopilotWaitLogged {
