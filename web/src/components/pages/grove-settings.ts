@@ -192,6 +192,9 @@ export class ScionPageGroveSettings extends LitElement {
   @state()
   private githubAppInstallationUrl = '';
 
+  @state()
+  private githubAppLoading = false;
+
   private syncAgentId: string | null = null;
   private syncPollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -622,7 +625,7 @@ export class ScionPageGroveSettings extends LitElement {
     this.stopSyncPolling();
   }
 
-  private async loadGrove(): Promise<void> {
+  private async loadGrove(skipGitHubCheck = false): Promise<void> {
     this.loading = true;
     this.error = null;
 
@@ -640,8 +643,8 @@ export class ScionPageGroveSettings extends LitElement {
       this.githubAppStatus = this.grove.githubAppStatus ?? null;
       this.githubAppPermissions = this.grove.githubPermissions ?? null;
 
-      // Check if the hub has a GitHub App configured
-      if (this.grove.gitRemote) {
+      // Check if the hub has a GitHub App configured (only on initial load)
+      if (!skipGitHubCheck && this.grove.gitRemote) {
         void this.checkGitHubAppConfigured();
       }
     } catch (err) {
@@ -1200,7 +1203,7 @@ export class ScionPageGroveSettings extends LitElement {
         const data = (await res.json().catch(() => ({}))) as { message?: string };
         throw new Error(data.message || `Check failed (${res.status})`);
       }
-      await this.loadGrove();
+      await this.loadGrove(true);
     } catch (err) {
       this.githubAppError = err instanceof Error ? err.message : 'Check failed';
     }
@@ -1215,8 +1218,8 @@ export class ScionPageGroveSettings extends LitElement {
         const data = (await res.json().catch(() => ({}))) as { message?: string };
         throw new Error(data.message || `Failed to discover installations (${res.status})`);
       }
-      // Reload grove to pick up any auto-association
-      await this.loadGrove();
+      // Reload grove to pick up any auto-association (skip GitHub check to prevent loop)
+      await this.loadGrove(true);
     } catch (err) {
       this.githubAppError = err instanceof Error ? err.message : 'Discovery failed';
     } finally {
@@ -1237,8 +1240,8 @@ export class ScionPageGroveSettings extends LitElement {
       this.githubAppInstallationId = null;
       this.githubAppStatus = null;
       this.githubAppPermissions = null;
-      // Reload grove
-      await this.loadGrove();
+      // Reload grove (skip GitHub check to prevent loop)
+      await this.loadGrove(true);
     } catch (err) {
       this.githubAppError = err instanceof Error ? err.message : 'Remove failed';
     } finally {
