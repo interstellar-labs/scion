@@ -25,6 +25,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 
 import type { PageData, RuntimeBroker } from '../../shared/types.js';
 import { stateManager } from '../../client/state.js';
+import { extractApiError } from '../../client/api.js';
 import { listPageStyles } from '../shared/resource-styles.js';
 import type { ViewMode } from '../shared/view-toggle.js';
 import '../shared/status-badge.js';
@@ -177,8 +178,7 @@ export class ScionPageBrokers extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       const data = (await response.json()) as { brokers?: RuntimeBroker[] } | RuntimeBroker[];

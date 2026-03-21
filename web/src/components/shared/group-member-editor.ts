@@ -28,7 +28,7 @@ import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import type { GroupMember, AdminGroup } from '../../shared/types.js';
-import { apiFetch } from '../../client/api.js';
+import { apiFetch, extractApiError } from '../../client/api.js';
 
 @customElement('scion-group-member-editor')
 export class ScionGroupMemberEditor extends LitElement {
@@ -438,8 +438,7 @@ export class ScionGroupMemberEditor extends LitElement {
       );
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}`));
       }
 
       const data = (await response.json()) as { members?: GroupMember[] } | GroupMember[];
@@ -561,8 +560,7 @@ export class ScionGroupMemberEditor extends LitElement {
       );
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       this.closeAddDialog();
@@ -591,8 +589,7 @@ export class ScionGroupMemberEditor extends LitElement {
       );
 
       if (!response.ok && response.status !== 204) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `Failed to remove member (HTTP ${response.status})`);
+        throw new Error(await extractApiError(response, `Failed to remove member (HTTP ${response.status})`));
       }
 
       await this.loadMembers();

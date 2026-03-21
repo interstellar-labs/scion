@@ -28,7 +28,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import type { EnvVar, ResourceScope, InjectionMode } from '../../shared/types.js';
-import { apiFetch } from '../../client/api.js';
+import { apiFetch, extractApiError } from '../../client/api.js';
 import { resourceStyles } from './resource-styles.js';
 
 @customElement('scion-env-var-list')
@@ -74,8 +74,7 @@ export class ScionEnvVarList extends LitElement {
       const response = await apiFetch(url);
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       const data = (await response.json()) as { envVars?: EnvVar[] } | EnvVar[];
@@ -154,8 +153,7 @@ export class ScionEnvVarList extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       this.closeDialog();
@@ -183,8 +181,7 @@ export class ScionEnvVarList extends LitElement {
       const response = await apiFetch(deleteUrl, { method: 'DELETE' });
 
       if (!response.ok && response.status !== 204) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `Failed to delete (HTTP ${response.status})`);
+        throw new Error(await extractApiError(response, `Failed to delete (HTTP ${response.status})`));
       }
 
       await this.loadEnvVars();

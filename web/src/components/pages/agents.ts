@@ -26,7 +26,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { PageData, Agent, Capabilities } from '../../shared/types.js';
 import { can, isTerminalAvailable, getAgentDisplayStatus, isAgentRunning } from '../../shared/types.js';
 import type { StatusType } from '../shared/status-badge.js';
-import { apiFetch } from '../../client/api.js';
+import { apiFetch, extractApiError } from '../../client/api.js';
 import { stateManager } from '../../client/state.js';
 import { listPageStyles } from '../shared/resource-styles.js';
 import type { ViewMode } from '../shared/view-toggle.js';
@@ -296,8 +296,7 @@ export class ScionPageAgents extends LitElement {
     const response = await apiFetch(url);
 
     if (!response.ok) {
-      const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-      throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
     }
 
     const data = (await response.json()) as { agents?: Agent[]; _capabilities?: Capabilities } | Agent[];
@@ -330,13 +329,7 @@ export class ScionPageAgents extends LitElement {
         });
 
         if (!response.ok) {
-          const errorData = (await response.json().catch(() => ({}))) as {
-            message?: string;
-            error?: { message?: string };
-          };
-          throw new Error(
-            errorData.error?.message || errorData.message || 'Failed to delete agent',
-          );
+          throw new Error(await extractApiError(response, 'Failed to delete agent'));
         }
 
         // Server confirmed — remove from local list
@@ -367,13 +360,7 @@ export class ScionPageAgents extends LitElement {
       const response = await apiFetch(url, { method: 'POST' });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as {
-          message?: string;
-          error?: { message?: string };
-        };
-        throw new Error(
-          errorData.error?.message || errorData.message || `Failed to ${action} agent`,
-        );
+        throw new Error(await extractApiError(response, `Failed to ${action} agent`));
       }
 
       this.backgroundRefresh();
@@ -406,13 +393,7 @@ export class ScionPageAgents extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as {
-          message?: string;
-          error?: { message?: string };
-        };
-        throw new Error(
-          errorData.error?.message || errorData.message || 'Failed to stop all agents',
-        );
+        throw new Error(await extractApiError(response, 'Failed to stop all agents'));
       }
 
       const result = (await response.json()) as { stopped: number; failed: number };

@@ -26,7 +26,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 
 import type { GCPServiceAccount, GCPVerificationStatus, Capabilities } from '../../shared/types.js';
 import { can } from '../../shared/types.js';
-import { apiFetch } from '../../client/api.js';
+import { apiFetch, extractApiError } from '../../client/api.js';
 import { resourceStyles } from './resource-styles.js';
 
 @customElement('scion-gcp-service-account-list')
@@ -111,8 +111,7 @@ export class ScionGCPServiceAccountList extends LitElement {
       const response = await apiFetch(`/api/v1/groves/${this.groveId}/gcp-service-accounts`);
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       const data = (await response.json()) as
@@ -182,8 +181,7 @@ export class ScionGCPServiceAccountList extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       this.closeDialog();
@@ -260,8 +258,7 @@ export class ScionGCPServiceAccountList extends LitElement {
       );
 
       if (!response.ok && response.status !== 204) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `Failed to delete (HTTP ${response.status})`);
+        throw new Error(await extractApiError(response, `Failed to delete (HTTP ${response.status})`));
       }
 
       await this.loadAccounts();

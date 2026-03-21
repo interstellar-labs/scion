@@ -23,6 +23,7 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 
+import { extractApiError } from '../../client/api.js';
 import '../shared/status-badge.js';
 
 type GroveMode = 'git' | 'hub';
@@ -285,11 +286,7 @@ export class ScionPageGroveCreate extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as {
-          message?: string;
-          error?: string;
-        };
-        throw new Error(errorData.message || errorData.error || `HTTP ${response.status}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}`));
       }
 
       const result = (await response.json()) as { grove?: { id: string }; id?: string };

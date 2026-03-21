@@ -25,7 +25,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 
 import type { PageData, Grove, Template, AdminGroup, GitHubAppGroveStatus, GitHubTokenPermissions } from '../../shared/types.js';
 import { can, canAny } from '../../shared/types.js';
-import { apiFetch } from '../../client/api.js';
+import { apiFetch, extractApiError } from '../../client/api.js';
 import '../shared/env-var-list.js';
 import '../shared/secret-list.js';
 import '../shared/shared-dir-list.js';
@@ -633,8 +633,7 @@ export class ScionPageGroveSettings extends LitElement {
       const response = await apiFetch(`/api/v1/groves/${this.groveId}`);
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       this.grove = (await response.json()) as Grove;
@@ -829,8 +828,7 @@ export class ScionPageGroveSettings extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `Failed to save: HTTP ${response.status}`);
+        throw new Error(await extractApiError(response, `Failed to save: HTTP ${response.status}`));
       }
 
       this.settings = (await response.json()) as GroveSettings;
@@ -854,10 +852,7 @@ export class ScionPageGroveSettings extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(
-          errorData.message || `Failed to start template sync: HTTP ${response.status}`
-        );
+        throw new Error(await extractApiError(response, `Failed to start template sync: HTTP ${response.status}`));
       }
 
       const data = (await response.json()) as { agentId: string; status: string };
@@ -950,8 +945,7 @@ export class ScionPageGroveSettings extends LitElement {
       });
 
       if (!response.ok && response.status !== 204) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `Failed to delete grove: HTTP ${response.status}`);
+        throw new Error(await extractApiError(response, `Failed to delete grove: HTTP ${response.status}`));
       }
 
       // Navigate back to groves list

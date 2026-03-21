@@ -26,6 +26,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 
 import type { PageData, Agent } from '../../shared/types.js';
 import { isTerminalAvailable } from '../../shared/types.js';
+import { extractApiError } from '../../client/api.js';
 
 // xterm.js imports are client-side only — guarded by typeof check in lifecycle
 // These will be imported dynamically in firstUpdated() since they require DOM APIs
@@ -306,10 +307,7 @@ export class ScionPageTerminal extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(
-          errorData.message || `HTTP ${response.status}: ${response.statusText}`
-        );
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       const agent = (await response.json()) as Agent;

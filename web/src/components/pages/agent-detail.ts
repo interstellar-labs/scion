@@ -47,7 +47,7 @@ interface AgentNotificationsResponse {
   agentNotifications: Notification[];
 }
 import type { StatusType } from '../shared/status-badge.js';
-import { apiFetch } from '../../client/api.js';
+import { apiFetch, extractApiError } from '../../client/api.js';
 import { stateManager } from '../../client/state.js';
 import '../shared/status-badge.js';
 import '../shared/agent-log-viewer.js';
@@ -621,10 +621,7 @@ export class ScionPageAgentDetail extends LitElement {
         const agentResponse = await apiFetch(`/api/v1/agents/${this.agentId}`);
 
         if (!agentResponse.ok) {
-          const errorData = (await agentResponse.json().catch(() => ({}))) as { message?: string };
-          throw new Error(
-            errorData.message || `HTTP ${agentResponse.status}: ${agentResponse.statusText}`
-          );
+          throw new Error(await extractApiError(agentResponse, `HTTP ${agentResponse.status}: ${agentResponse.statusText}`));
         }
 
         this.agent = (await agentResponse.json()) as Agent;
@@ -771,13 +768,7 @@ export class ScionPageAgentDetail extends LitElement {
         });
 
         if (!response.ok) {
-          const errorData = (await response.json().catch(() => ({}))) as {
-            message?: string;
-            error?: { message?: string };
-          };
-          throw new Error(
-            errorData.error?.message || errorData.message || 'Failed to delete agent'
-          );
+          throw new Error(await extractApiError(response, 'Failed to delete agent'));
         }
 
         window.location.href = '/agents';
@@ -804,13 +795,7 @@ export class ScionPageAgentDetail extends LitElement {
       const response = await apiFetch(url, { method: 'POST' });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as {
-          message?: string;
-          error?: { message?: string };
-        };
-        throw new Error(
-          errorData.error?.message || errorData.message || `Failed to ${action} agent`
-        );
+        throw new Error(await extractApiError(response, `Failed to ${action} agent`));
       }
 
       this.backgroundRefresh();

@@ -25,6 +25,7 @@ import { customElement, state } from 'lit/decorators.js';
 
 import type { AdminUser } from '../../shared/types.js';
 import '../shared/status-badge.js';
+import { extractApiError } from '../../client/api.js';
 
 type SortField = 'name' | 'created' | 'lastSeen';
 type SortDir = 'asc' | 'desc';
@@ -397,8 +398,7 @@ export class ScionPageAdminUsers extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       const data = (await response.json()) as {

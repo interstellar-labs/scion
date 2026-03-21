@@ -26,7 +26,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { PageData, Grove, Agent, Capabilities } from '../../shared/types.js';
 import { can, canAny, getAgentDisplayStatus, isAgentRunning, isTerminalAvailable } from '../../shared/types.js';
 import type { StatusType } from '../shared/status-badge.js';
-import { apiFetch } from '../../client/api.js';
+import { apiFetch, extractApiError } from '../../client/api.js';
 import { stateManager } from '../../client/state.js';
 import type { ViewMode } from '../shared/view-toggle.js';
 import '../shared/status-badge.js';
@@ -706,10 +706,7 @@ export class ScionPageGroveDetail extends LitElement {
       ]);
 
       if (!groveResponse.ok) {
-        const errorData = (await groveResponse.json().catch(() => ({}))) as { message?: string };
-        throw new Error(
-          errorData.message || `HTTP ${groveResponse.status}: ${groveResponse.statusText}`
-        );
+        throw new Error(await extractApiError(groveResponse, `HTTP ${groveResponse.status}: ${groveResponse.statusText}`));
       }
 
       this.grove = (await groveResponse.json()) as Grove;
@@ -839,8 +836,7 @@ export class ScionPageGroveDetail extends LitElement {
       const response = await apiFetch(`/api/v1/groves/${this.groveId}/workspace/files`);
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}`));
       }
 
       const data = (await response.json()) as {
@@ -887,8 +883,7 @@ export class ScionPageGroveDetail extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `Upload failed: HTTP ${response.status}`);
+        throw new Error(await extractApiError(response, `Upload failed: HTTP ${response.status}`));
       }
 
       // Reload file list (non-blocking for workspace operations)
@@ -921,8 +916,7 @@ export class ScionPageGroveDetail extends LitElement {
       );
 
       if (!response.ok && response.status !== 204) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `Delete failed: HTTP ${response.status}`);
+        throw new Error(await extractApiError(response, `Delete failed: HTTP ${response.status}`));
       }
 
       // Remove file from local list immediately, then refresh in background
@@ -1007,13 +1001,7 @@ export class ScionPageGroveDetail extends LitElement {
         });
 
         if (!response.ok) {
-          const errorData = (await response.json().catch(() => ({}))) as {
-            message?: string;
-            error?: { message?: string };
-          };
-          throw new Error(
-            errorData.error?.message || errorData.message || 'Failed to delete agent'
-          );
+          throw new Error(await extractApiError(response, 'Failed to delete agent'));
         }
 
         // Server confirmed — remove from local list
@@ -1044,13 +1032,7 @@ export class ScionPageGroveDetail extends LitElement {
       const response = await apiFetch(url, { method: 'POST' });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as {
-          message?: string;
-          error?: { message?: string };
-        };
-        throw new Error(
-          errorData.error?.message || errorData.message || `Failed to ${action} agent`
-        );
+        throw new Error(await extractApiError(response, `Failed to ${action} agent`));
       }
 
       this.backgroundRefresh();
@@ -1086,13 +1068,7 @@ export class ScionPageGroveDetail extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as {
-          message?: string;
-          error?: { message?: string };
-        };
-        throw new Error(
-          errorData.error?.message || errorData.message || 'Failed to stop all agents'
-        );
+        throw new Error(await extractApiError(response, 'Failed to stop all agents'));
       }
 
       const result = (await response.json()) as { stopped: number; failed: number };

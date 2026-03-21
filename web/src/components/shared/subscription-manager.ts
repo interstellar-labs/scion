@@ -24,7 +24,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
-import { apiFetch } from '../../client/api.js';
+import { apiFetch, extractApiError } from '../../client/api.js';
 import { resourceStyles } from './resource-styles.js';
 import type { Subscription, SubscriptionScope } from '../../shared/types.js';
 
@@ -96,8 +96,7 @@ export class ScionSubscriptionManager extends LitElement {
       const response = await apiFetch(url);
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       const data = (await response.json()) as Subscription[] | { subscriptions?: Subscription[] } | null;
@@ -174,13 +173,7 @@ export class ScionSubscriptionManager extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as {
-          message?: string;
-          error?: { message?: string };
-        };
-        throw new Error(
-          errorData.error?.message || errorData.message || `HTTP ${response.status}`
-        );
+        throw new Error(await extractApiError(response, `HTTP ${response.status}`));
       }
 
       this.closeDialog();
@@ -217,8 +210,7 @@ export class ScionSubscriptionManager extends LitElement {
       );
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}`));
       }
 
       this.editingId = null;
@@ -241,8 +233,7 @@ export class ScionSubscriptionManager extends LitElement {
       );
 
       if (!response.ok && response.status !== 204) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}`));
       }
 
       await this.loadSubscriptions();

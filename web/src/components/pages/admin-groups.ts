@@ -24,6 +24,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 
 import type { AdminGroup } from '../../shared/types.js';
+import { extractApiError } from '../../client/api.js';
 
 @customElement('scion-page-admin-groups')
 export class ScionPageAdminGroups extends LitElement {
@@ -305,8 +306,7 @@ export class ScionPageAdminGroups extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       const data = (await response.json()) as { groups?: AdminGroup[] } | AdminGroup[];

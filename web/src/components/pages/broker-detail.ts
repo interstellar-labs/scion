@@ -27,7 +27,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { PageData, RuntimeBroker, Agent } from '../../shared/types.js';
 import { getAgentDisplayStatus } from '../../shared/types.js';
 import type { StatusType } from '../shared/status-badge.js';
-import { apiFetch } from '../../client/api.js';
+import { apiFetch, extractApiError } from '../../client/api.js';
 import { stateManager } from '../../client/state.js';
 import '../shared/status-badge.js';
 
@@ -471,10 +471,7 @@ export class ScionPageBrokerDetail extends LitElement {
       ]);
 
       if (!brokerResponse.ok) {
-        const errorData = (await brokerResponse.json().catch(() => ({}))) as { message?: string };
-        throw new Error(
-          errorData.message || `HTTP ${brokerResponse.status}: ${brokerResponse.statusText}`
-        );
+        throw new Error(await extractApiError(brokerResponse, `HTTP ${brokerResponse.status}: ${brokerResponse.statusText}`));
       }
 
       this.broker = (await brokerResponse.json()) as RuntimeBroker;

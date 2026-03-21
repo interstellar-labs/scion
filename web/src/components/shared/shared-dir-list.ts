@@ -27,7 +27,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import type { SharedDir } from '../../shared/types.js';
-import { apiFetch } from '../../client/api.js';
+import { apiFetch, extractApiError } from '../../client/api.js';
 import { resourceStyles } from './resource-styles.js';
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
@@ -71,8 +71,7 @@ export class ScionSharedDirList extends LitElement {
       const response = await apiFetch(`${this.basePath}/shared-dirs`);
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       const data = (await response.json()) as { sharedDirs?: SharedDir[] } | SharedDir[];
@@ -139,8 +138,7 @@ export class ScionSharedDirList extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       this.closeDialog();
@@ -172,8 +170,7 @@ export class ScionSharedDirList extends LitElement {
       );
 
       if (!response.ok && response.status !== 204) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `Failed to delete (HTTP ${response.status})`);
+        throw new Error(await extractApiError(response, `Failed to delete (HTTP ${response.status})`));
       }
 
       await this.loadSharedDirs();

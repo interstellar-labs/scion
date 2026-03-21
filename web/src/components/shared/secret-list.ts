@@ -28,7 +28,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import type { Secret, SecretType, ResourceScope, InjectionMode } from '../../shared/types.js';
-import { apiFetch } from '../../client/api.js';
+import { apiFetch, extractApiError } from '../../client/api.js';
 import { resourceStyles } from './resource-styles.js';
 
 @customElement('scion-secret-list')
@@ -76,8 +76,7 @@ export class ScionSecretList extends LitElement {
       const response = await apiFetch(url);
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       const data = (await response.json()) as { secrets?: Secret[] } | Secret[];
@@ -156,8 +155,7 @@ export class ScionSecretList extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       this.closeDialog();
@@ -185,8 +183,7 @@ export class ScionSecretList extends LitElement {
       const response = await apiFetch(deleteUrl, { method: 'DELETE' });
 
       if (!response.ok && response.status !== 204) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `Failed to delete (HTTP ${response.status})`);
+        throw new Error(await extractApiError(response, `Failed to delete (HTTP ${response.status})`));
       }
 
       await this.loadSecrets();

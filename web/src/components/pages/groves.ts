@@ -25,7 +25,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 
 import type { PageData, Grove, Capabilities } from '../../shared/types.js';
 import { can } from '../../shared/types.js';
-import { apiFetch } from '../../client/api.js';
+import { apiFetch, extractApiError } from '../../client/api.js';
 import { stateManager } from '../../client/state.js';
 import { listPageStyles } from '../shared/resource-styles.js';
 import type { ViewMode } from '../shared/view-toggle.js';
@@ -200,8 +200,7 @@ export class ScionPageGroves extends LitElement {
       const response = await apiFetch(url);
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}: ${response.statusText}`));
       }
 
       const data = (await response.json()) as { groves?: Grove[]; _capabilities?: Capabilities } | Grove[];

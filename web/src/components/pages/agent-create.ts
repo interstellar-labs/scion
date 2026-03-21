@@ -30,7 +30,7 @@ import type {
   Template,
   GCPServiceAccount,
 } from '../../shared/types.js';
-import { apiFetch } from '../../client/api.js';
+import { apiFetch, extractApiError } from '../../client/api.js';
 import '../shared/status-badge.js';
 
 @customElement('scion-page-agent-create')
@@ -491,16 +491,7 @@ export class ScionPageAgentCreate extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as {
-          message?: string;
-          error?: string | { message?: string; code?: string };
-        };
-        const msg =
-          (typeof errorData.error === 'object' && errorData.error?.message) ||
-          errorData.message ||
-          (typeof errorData.error === 'string' && errorData.error) ||
-          `HTTP ${response.status}`;
-        throw new Error(msg);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}`));
       }
 
       const result = (await response.json()) as {
@@ -612,16 +603,7 @@ export class ScionPageAgentCreate extends LitElement {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as {
-          message?: string;
-          error?: string | { message?: string; code?: string };
-        };
-        const msg =
-          (typeof errorData.error === 'object' && errorData.error?.message) ||
-          errorData.message ||
-          (typeof errorData.error === 'string' && errorData.error) ||
-          `HTTP ${response.status}`;
-        throw new Error(msg);
+        throw new Error(await extractApiError(response, `HTTP ${response.status}`));
       }
 
       const result = (await response.json()) as {
