@@ -60,7 +60,7 @@ func waitForTmuxSession(ctx context.Context, runtimeCmd, containerID, namespace 
 		case <-ticker.C:
 			var cmd *exec.Cmd
 			if runtimeCmd == "kubernetes" || runtimeCmd == "k8s" {
-				args := buildKubectlExecArgs(namespace, containerID, []string{"tmux", "has-session", "-t", "scion"})
+				args := buildKubectlExecArgs(namespace, containerID, []string{"tmux", "has-session", "-t", "scion"}, false)
 				cmd = exec.CommandContext(ctx, "kubectl", args...)
 			} else {
 				cmd = exec.CommandContext(ctx, runtimeCmd, "exec", "--user", "scion", containerID, "tmux", "has-session", "-t", "scion")
@@ -74,8 +74,13 @@ func waitForTmuxSession(ctx context.Context, runtimeCmd, containerID, namespace 
 }
 
 // buildKubectlExecArgs constructs arguments for kubectl exec into a pod.
-func buildKubectlExecArgs(namespace, podName string, command []string) []string {
-	args := []string{"exec", "-it", podName, "-c", "agent"}
+// When interactive is true, -it flags are included (requires a PTY on stdin).
+func buildKubectlExecArgs(namespace, podName string, command []string, interactive bool) []string {
+	args := []string{"exec"}
+	if interactive {
+		args = append(args, "-it")
+	}
+	args = append(args, podName, "-c", "agent")
 	if namespace != "" {
 		args = append(args, "-n", namespace)
 	}
@@ -260,7 +265,7 @@ func (s *LocalPTYSession) startDockerExec() error {
 
 	if s.runtimeCmd == "kubernetes" || s.runtimeCmd == "k8s" {
 		execBin = "kubectl"
-		args = buildKubectlExecArgs(s.namespace, s.containerID, []string{"tmux", "attach-session", "-t", "scion"})
+		args = buildKubectlExecArgs(s.namespace, s.containerID, []string{"tmux", "attach-session", "-t", "scion"}, true)
 	} else {
 		execBin = s.runtimeCmd
 		args = []string{
@@ -494,7 +499,7 @@ func (h *StreamPTYHandler) startDockerExec() error {
 
 	if runtimeCmd == "kubernetes" || runtimeCmd == "k8s" {
 		execBin = "kubectl"
-		args = buildKubectlExecArgs(h.namespace, h.containerID, []string{"tmux", "attach-session", "-t", "scion"})
+		args = buildKubectlExecArgs(h.namespace, h.containerID, []string{"tmux", "attach-session", "-t", "scion"}, true)
 	} else {
 		execBin = runtimeCmd
 		args = []string{
