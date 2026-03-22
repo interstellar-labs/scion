@@ -64,7 +64,8 @@ func TestMessage(t *testing.T) {
 
 	expectedCmds := []string{
 		"tmux send-keys -t scion:0 C-c",
-		"tmux send-keys -t scion:0 -l hello world",
+		"tmux set-buffer -- hello world",
+		"tmux paste-buffer -t scion:0 -p",
 		"tmux send-keys -t scion:0 Enter",
 		"tmux send-keys -t scion:0 Enter",
 		"tmux send-keys -t scion:0 Enter",
@@ -110,8 +111,8 @@ func TestBroadcast(t *testing.T) {
 		mu.Lock()
 		capturedCalls = append(capturedCalls, fmt.Sprintf("%s: %s", id, strings.Join(cmd, " ")))
 		// Signal done for each bare Enter keypress (two trailing Enters per agent delivery).
-		// Bare Enter: ["tmux", "send-keys", "-t", "scion:0", "Enter"] → len 5, no "-l" flag.
-		if len(cmd) == 5 && cmd[3] == "scion:0" && cmd[4] == "Enter" {
+		// Bare Enter: ["tmux", "send-keys", "-t", "scion:0", "Enter"] → len 5.
+		if len(cmd) == 5 && cmd[0] == "tmux" && cmd[1] == "send-keys" && cmd[4] == "Enter" {
 			done <- struct{}{}
 		}
 		mu.Unlock()
@@ -152,11 +153,13 @@ func TestBroadcast(t *testing.T) {
 	defer mu.Unlock()
 
 	expectedCalls := []string{
-		"agent-1: tmux send-keys -t scion:0 -l hello",
+		"agent-1: tmux set-buffer -- hello",
+		"agent-1: tmux paste-buffer -t scion:0 -p",
 		"agent-1: tmux send-keys -t scion:0 Enter",
 		"agent-1: tmux send-keys -t scion:0 Enter",
 		"agent-1: tmux send-keys -t scion:0 Enter",
-		"agent-2: tmux send-keys -t scion:0 -l hello",
+		"agent-2: tmux set-buffer -- hello",
+		"agent-2: tmux paste-buffer -t scion:0 -p",
 		"agent-2: tmux send-keys -t scion:0 Enter",
 		"agent-2: tmux send-keys -t scion:0 Enter",
 		"agent-2: tmux send-keys -t scion:0 Enter",
@@ -171,13 +174,13 @@ func TestBroadcast(t *testing.T) {
 	agent1Calls := filterByPrefix(capturedCalls, "agent-1:")
 	agent2Calls := filterByPrefix(capturedCalls, "agent-2:")
 
-	if len(agent1Calls) != 4 || len(agent2Calls) != 4 {
-		t.Fatalf("Expected 4 calls per agent, got agent-1=%d agent-2=%d", len(agent1Calls), len(agent2Calls))
+	if len(agent1Calls) != 5 || len(agent2Calls) != 5 {
+		t.Fatalf("Expected 5 calls per agent, got agent-1=%d agent-2=%d", len(agent1Calls), len(agent2Calls))
 	}
-	if agent1Calls[0] != "agent-1: tmux send-keys -t scion:0 -l hello" {
+	if agent1Calls[0] != "agent-1: tmux set-buffer -- hello" {
 		t.Errorf("Unexpected agent-1 call[0]: %s", agent1Calls[0])
 	}
-	if agent2Calls[0] != "agent-2: tmux send-keys -t scion:0 -l hello" {
+	if agent2Calls[0] != "agent-2: tmux set-buffer -- hello" {
 		t.Errorf("Unexpected agent-2 call[0]: %s", agent2Calls[0])
 	}
 }

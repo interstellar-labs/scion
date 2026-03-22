@@ -203,7 +203,14 @@ func (m *AgentManager) deliverImmediate(ctx context.Context, agentID string, mes
 		// Empty messages send a bare Enter keypress to trigger confirmations
 		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion:0", "Enter"})
 	} else {
-		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion:0", "-l", message})
+		// Use tmux paste buffer with bracketed paste (-p) instead of send-keys.
+		// send-keys simulates typing character-by-character, which allows TUI
+		// applications to intercept special characters as hotkeys (e.g., Gemini
+		// CLI treats '!' as a shell-mode toggle). Bracketed paste wraps the
+		// content in escape sequences (\e[200~...\e[201~) that signal the
+		// application to treat all characters as literal pasted text.
+		cmds = append(cmds, []string{"tmux", "set-buffer", "--", message})
+		cmds = append(cmds, []string{"tmux", "paste-buffer", "-t", "scion:0", "-p"})
 		cmds = append(cmds, []string{"tmux", "send-keys", "-t", "scion:0", "Enter"})
 	}
 
