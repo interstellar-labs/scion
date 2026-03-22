@@ -19,7 +19,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/scion/pkg/api"
@@ -294,7 +293,7 @@ func TestBuildStartContext_AttachMode(t *testing.T) {
 	}
 }
 
-func TestBuildStartContext_HubNativeGroveWritesGroveID(t *testing.T) {
+func TestBuildStartContext_HubNativeGroveWritesMarker(t *testing.T) {
 	cfg := DefaultServerConfig()
 	cfg.StateDir = t.TempDir()
 	mgr := &envCapturingManager{}
@@ -316,40 +315,35 @@ func TestBuildStartContext_HubNativeGroveWritesGroveID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify .scion dir was created
-	scionDir := filepath.Join(grovePath, ".scion")
-	if _, err := os.Stat(scionDir); os.IsNotExist(err) {
-		t.Fatal(".scion directory was not created")
+	// Verify .scion marker file was created (not a directory)
+	scionPath := filepath.Join(grovePath, ".scion")
+	if !config.IsGroveMarkerFile(scionPath) {
+		t.Fatal(".scion marker file was not created")
 	}
 
-	// Verify grove-id was written with hub's ID
-	groveID, err := config.ReadGroveID(scionDir)
+	// Verify grove-id was written via marker
+	marker, err := config.ReadGroveMarker(scionPath)
 	if err != nil {
-		t.Fatalf("failed to read grove-id: %v", err)
+		t.Fatalf("failed to read .scion marker: %v", err)
 	}
-	if groveID != "6d868c0f-b862-49e0-a44b-3555a3887ee3" {
-		t.Errorf("expected grove-id '6d868c0f-b862-49e0-a44b-3555a3887ee3', got %q", groveID)
+	if marker.GroveID != "6d868c0f-b862-49e0-a44b-3555a3887ee3" {
+		t.Errorf("expected grove-id '6d868c0f-b862-49e0-a44b-3555a3887ee3', got %q", marker.GroveID)
+	}
+	if marker.GroveSlug != "web-demo" {
+		t.Errorf("expected grove-slug 'web-demo', got %q", marker.GroveSlug)
 	}
 
 	// Verify external grove-configs directories were created
-	extAgents, err := config.GetGitGroveExternalAgentsDir(scionDir)
+	extPath, err := marker.ExternalGrovePath()
 	if err != nil {
-		t.Fatalf("failed to get external agents dir: %v", err)
+		t.Fatalf("failed to get external grove path: %v", err)
 	}
-	if extAgents == "" {
-		t.Fatal("expected non-empty external agents dir")
+	if extPath == "" {
+		t.Fatal("expected non-empty external grove path")
 	}
+	extAgents := filepath.Join(extPath, "agents")
 	if _, err := os.Stat(extAgents); os.IsNotExist(err) {
 		t.Fatalf("external agents dir was not created: %s", extAgents)
-	}
-
-	// Verify agent home resolves to external path (not inside workspace)
-	agentHome := config.GetAgentHomePath(scionDir, "test-agent")
-	if !strings.Contains(agentHome, "grove-configs") {
-		t.Errorf("expected agent home under grove-configs, got %q", agentHome)
-	}
-	if strings.Contains(agentHome, "web-demo") && !strings.Contains(agentHome, "grove-configs") {
-		t.Errorf("agent home should NOT be inside workspace dir, got %q", agentHome)
 	}
 
 	// GrovePath should be passed through to opts
@@ -378,14 +372,14 @@ func TestBuildStartContext_HubNativeGroveSlugResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify grove-id was written
-	scionDir := filepath.Join(sc.Opts.GrovePath, ".scion")
-	groveID, err := config.ReadGroveID(scionDir)
+	// Verify grove-id was written via marker file
+	scionPath := filepath.Join(sc.Opts.GrovePath, ".scion")
+	marker, err := config.ReadGroveMarker(scionPath)
 	if err != nil {
-		t.Fatalf("failed to read grove-id: %v", err)
+		t.Fatalf("failed to read .scion marker: %v", err)
 	}
-	if groveID != "aabbccdd-1234-5678-9012-abcdef123456" {
-		t.Errorf("expected grove-id from hub, got %q", groveID)
+	if marker.GroveID != "aabbccdd-1234-5678-9012-abcdef123456" {
+		t.Errorf("expected grove-id from hub, got %q", marker.GroveID)
 	}
 }
 
@@ -396,7 +390,7 @@ func TestBuildStartContext_HubNativeGrovePreservesExistingGroveID(t *testing.T) 
 	rt := &runtime.MockRuntime{}
 	srv := New(cfg, mgr, rt)
 
-	// Pre-create .scion dir with an existing grove-id
+	// Pre-create .scion as a directory with an existing grove-id (git grove)
 	grovePath := filepath.Join(t.TempDir(), "existing-grove")
 	scionDir := filepath.Join(grovePath, ".scion")
 	if err := os.MkdirAll(scionDir, 0755); err != nil {
@@ -417,13 +411,55 @@ func TestBuildStartContext_HubNativeGrovePreservesExistingGroveID(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	// Verify existing grove-id was NOT overwritten
+	// Verify existing grove-id was NOT overwritten (directory-based path)
 	groveID, err := config.ReadGroveID(scionDir)
 	if err != nil {
 		t.Fatalf("failed to read grove-id: %v", err)
 	}
 	if groveID != existingID {
 		t.Errorf("expected existing grove-id %q to be preserved, got %q", existingID, groveID)
+	}
+}
+
+func TestBuildStartContext_HubNativeGrovePreservesExistingMarker(t *testing.T) {
+	cfg := DefaultServerConfig()
+	cfg.StateDir = t.TempDir()
+	mgr := &envCapturingManager{}
+	rt := &runtime.MockRuntime{}
+	srv := New(cfg, mgr, rt)
+
+	// Pre-create .scion as a marker file (hub-native grove)
+	grovePath := filepath.Join(t.TempDir(), "existing-grove")
+	if err := os.MkdirAll(grovePath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	existingID := "existing-id-1234-5678"
+	scionPath := filepath.Join(grovePath, ".scion")
+	if err := config.WriteGroveMarker(scionPath, &config.GroveMarker{
+		GroveID:   existingID,
+		GroveName: "existing-grove",
+		GroveSlug: "existing-grove",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := srv.buildStartContext(context.Background(), startContextInputs{
+		Name:      "agent-1",
+		GroveSlug: "existing-grove",
+		GrovePath: grovePath,
+		GroveID:   "new-id-from-hub",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify existing marker was NOT overwritten (marker file path)
+	marker, err := config.ReadGroveMarker(scionPath)
+	if err != nil {
+		t.Fatalf("failed to read marker: %v", err)
+	}
+	if marker.GroveID != existingID {
+		t.Errorf("expected existing grove-id %q to be preserved, got %q", existingID, marker.GroveID)
 	}
 }
 

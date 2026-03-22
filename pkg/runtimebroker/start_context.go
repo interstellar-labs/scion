@@ -102,39 +102,79 @@ func (s *Server) buildStartContext(ctx context.Context, in startContextInputs) (
 		}
 	}
 
-	// Ensure hub-native groves have a .scion directory with grove-id for
+	// Ensure hub-native groves have a .scion marker with grove-id for
 	// external split storage. When the hub dispatches to a broker without a
 	// LocalPath (e.g. auto-provided embedded broker for a linked grove), the
 	// broker creates the workspace at ~/.scion/groves/<slug>/. Without a
-	// grove-id file, agents are provisioned inside that workspace directory.
+	// grove-id, agents are provisioned inside that workspace directory.
 	// Writing the hub's grove ID enables split storage so agent homes go to
 	// ~/.scion/grove-configs/<slug>__<uuid>/.scion/agents/ instead.
+	//
+	// The .scion path may be a marker file (hub-native/workspace marker) or
+	// a directory (git grove). This block handles both forms.
 	//
 	// This block also handles the case where the createAgent handler already
 	// resolved GrovePath (for env-gather) before calling buildStartContext,
 	// which would skip the resolution block above.
 	if in.GroveSlug != "" && in.GrovePath != "" {
-		scionDir := filepath.Join(in.GrovePath, ".scion")
-		if err := os.MkdirAll(scionDir, 0755); err != nil {
-			s.agentLifecycleLog.Warn("Failed to create .scion dir for hub-native grove",
-				"agent_id", in.AgentID, "slug", in.GroveSlug, "path", scionDir, "error", err)
-		}
-		if in.GroveID != "" {
-			if existingID, err := config.ReadGroveID(scionDir); err != nil || existingID == "" {
-				if wErr := config.WriteGroveID(scionDir, in.GroveID); wErr != nil {
-					s.agentLifecycleLog.Warn("Failed to write grove-id for hub-native grove",
+		scionPath := filepath.Join(in.GrovePath, config.DotScion)
+
+		if config.IsGroveMarkerFile(scionPath) {
+			// .scion is a marker file — grove-id is already recorded.
+			// Ensure external split storage directories exist.
+			if marker, err := config.ReadGroveMarker(scionPath); err == nil && marker.GroveID != "" {
+				if extPath, err := marker.ExternalGrovePath(); err == nil && extPath != "" {
+					_ = os.MkdirAll(extPath, 0755)
+					_ = os.MkdirAll(filepath.Join(extPath, "agents"), 0755)
+				}
+				if s.config.Debug {
+					s.agentLifecycleLog.Debug("Hub-native grove has marker with split storage",
+						"agent_id", in.AgentID, "slug", in.GroveSlug, "grove_id", marker.GroveID, "path", scionPath)
+				}
+			}
+		} else if info, statErr := os.Stat(scionPath); statErr == nil && info.IsDir() {
+			// .scion is a directory (git grove) — use file-based grove-id
+			if in.GroveID != "" {
+				if existingID, err := config.ReadGroveID(scionPath); err != nil || existingID == "" {
+					if wErr := config.WriteGroveID(scionPath, in.GroveID); wErr != nil {
+						s.agentLifecycleLog.Warn("Failed to write grove-id for hub-native grove",
+							"agent_id", in.AgentID, "grove_id", in.GroveID, "error", wErr)
+					} else {
+						if extAgents, err := config.GetGitGroveExternalAgentsDir(scionPath); err == nil && extAgents != "" {
+							_ = os.MkdirAll(extAgents, 0755)
+						}
+						if extConfig, err := config.GetGitGroveExternalConfigDir(scionPath); err == nil && extConfig != "" {
+							_ = os.MkdirAll(extConfig, 0755)
+						}
+						if s.config.Debug {
+							s.agentLifecycleLog.Debug("Initialized git grove with split storage",
+								"agent_id", in.AgentID, "slug", in.GroveSlug, "grove_id", in.GroveID, "path", scionPath)
+						}
+					}
+				}
+			}
+		} else if in.GroveID != "" {
+			// .scion doesn't exist — create grove dir and write a marker file
+			if err := os.MkdirAll(in.GrovePath, 0755); err != nil {
+				s.agentLifecycleLog.Warn("Failed to create grove dir for hub-native grove",
+					"agent_id", in.AgentID, "slug", in.GroveSlug, "path", in.GrovePath, "error", err)
+			} else {
+				marker := &config.GroveMarker{
+					GroveID:   in.GroveID,
+					GroveName: in.GroveSlug,
+					GroveSlug: in.GroveSlug,
+				}
+				if wErr := config.WriteGroveMarker(scionPath, marker); wErr != nil {
+					s.agentLifecycleLog.Warn("Failed to write .scion marker for hub-native grove",
 						"agent_id", in.AgentID, "grove_id", in.GroveID, "error", wErr)
 				} else {
-					// Create external grove-configs directories for split storage
-					if extAgents, err := config.GetGitGroveExternalAgentsDir(scionDir); err == nil && extAgents != "" {
-						_ = os.MkdirAll(extAgents, 0755)
-					}
-					if extConfig, err := config.GetGitGroveExternalConfigDir(scionDir); err == nil && extConfig != "" {
-						_ = os.MkdirAll(extConfig, 0755)
+					if extPath, err := marker.ExternalGrovePath(); err == nil && extPath != "" {
+						_ = os.MkdirAll(extPath, 0755)
+						_ = os.MkdirAll(filepath.Join(extPath, "agents"), 0755)
 					}
 					if s.config.Debug {
 						s.agentLifecycleLog.Debug("Initialized hub-native grove with split storage",
-							"agent_id", in.AgentID, "slug", in.GroveSlug, "grove_id", in.GroveID, "path", scionDir)
+							"agent_id", in.AgentID, "slug", in.GroveSlug, "grove_id", in.GroveID, "path", scionPath)
 					}
 				}
 			}
