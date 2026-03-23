@@ -116,11 +116,12 @@ export async function parseApiError(res: Response, fallback: string): Promise<Ap
       message?: string;
     };
     if (typeof data.error === 'object' && data.error) {
-      return {
+      const info: ApiErrorInfo = {
         code: data.error.code ?? '',
         message: data.error.message ?? fallback,
-        details: data.error.details,
       };
+      if (data.error.details) info.details = data.error.details;
+      return info;
     }
     if (typeof data.message === 'string') return { code: '', message: data.message };
     if (typeof data.error === 'string') return { code: '', message: data.error };

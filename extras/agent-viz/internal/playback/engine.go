@@ -17,13 +17,13 @@ type Engine struct {
 	endTime   time.Time
 
 	// Playback state
-	playing    bool
-	speed      float64
-	position   int // current event index
-	currentTS  time.Time
-	stopCh     chan struct{}
-	eventsCh   chan logparser.PlaybackEvent
-	statusCh   chan StatusUpdate
+	playing   bool
+	speed     float64
+	position  int // current event index
+	currentTS time.Time
+	stopCh    chan struct{}
+	eventsCh  chan logparser.PlaybackEvent
+	statusCh  chan StatusUpdate
 
 	// Filters
 	agentFilter     map[string]bool // nil = all

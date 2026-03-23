@@ -1956,12 +1956,11 @@ export class ScionPageAdminServerConfig extends LitElement {
           if (!this.rawConfig.server) {
             this.rawConfig.server = {};
           }
-          this.rawConfig.server.github_app = {
-            app_id: data.app_id || undefined,
-            api_base_url: data.api_base_url || undefined,
-            webhooks_enabled: data.webhooks_enabled,
-            installation_url: data.installation_url || undefined,
-          };
+          const ghApp: V1GitHubAppConfig = { webhooks_enabled: data.webhooks_enabled };
+          if (data.app_id) ghApp.app_id = data.app_id;
+          if (data.api_base_url) ghApp.api_base_url = data.api_base_url;
+          if (data.installation_url) ghApp.installation_url = data.installation_url;
+          this.rawConfig.server.github_app = ghApp;
         }
         // Clear write-only fields after load
         this.githubAppPrivateKey = '';
@@ -2066,12 +2065,11 @@ export class ScionPageAdminServerConfig extends LitElement {
         if (!this.rawConfig.server) {
           this.rawConfig.server = {};
         }
-        this.rawConfig.server.github_app = {
-          app_id: this.githubAppId || undefined,
-          api_base_url: this.githubAppApiBaseUrl || undefined,
-          webhooks_enabled: this.githubAppWebhooksEnabled,
-          installation_url: this.githubAppInstallationUrl || undefined,
-        };
+        const ghApp: V1GitHubAppConfig = { webhooks_enabled: this.githubAppWebhooksEnabled };
+        if (this.githubAppId) ghApp.app_id = this.githubAppId;
+        if (this.githubAppApiBaseUrl) ghApp.api_base_url = this.githubAppApiBaseUrl;
+        if (this.githubAppInstallationUrl) ghApp.installation_url = this.githubAppInstallationUrl;
+        this.rawConfig.server.github_app = ghApp;
       }
       // Reload to get fresh state (has_private_key, has_webhook_secret, configured)
       await this.loadGitHubAppConfig();

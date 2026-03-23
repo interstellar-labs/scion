@@ -30,7 +30,7 @@ import type {
   Template,
   GCPServiceAccount,
 } from '../../shared/types.js';
-import { apiFetch, extractApiError, parseApiError } from '../../client/api.js';
+import { apiFetch, parseApiError } from '../../client/api.js';
 import '../shared/status-badge.js';
 
 @customElement('scion-page-agent-create')

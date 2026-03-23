@@ -34,13 +34,13 @@ import (
 var chatFS embed.FS
 
 const (
-	defaultPort       = "8080"
-	defaultTimeout    = 60 * time.Second
-	maxQueryLength    = 1000
+	defaultPort      = "8080"
+	defaultTimeout   = 60 * time.Second
+	maxQueryLength   = 1000
 	defaultWorkspace = "/workspace"
 	defaultRepoDir   = "scion"
-	defaultSystemMD   = "extras/docs-agent/system-prompt.md"
-	defaultModel      = "gemini-3.1-flash-lite-preview"
+	defaultSystemMD  = "extras/docs-agent/system-prompt.md"
+	defaultModel     = "gemini-3.1-flash-lite-preview"
 )
 
 var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)

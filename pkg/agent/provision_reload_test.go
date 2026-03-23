@@ -65,17 +65,12 @@ func TestProvisionAgentReloadsConfig(t *testing.T) {
 		t.Fatalf("ProvisionAgent failed: %v", err)
 	}
 
-	// Verify env
-	if cfg.Env == nil {
-		t.Fatal("expected cfg.Env to be non-nil")
-	}
-
-	val, ok := cfg.Env["GEMINI_API_KEY"]
-	if !ok {
-		t.Error("expected GEMINI_API_KEY to be in returned config Env")
-	}
-	if val != "${GEMINI_API_KEY}" {
-		t.Errorf("expected GEMINI_API_KEY to be '${GEMINI_API_KEY}', got '%s'", val)
+	// With no auth_selected_type in the gemini harness config, no env vars
+	// should be injected by Provision (auth is determined at runtime).
+	if cfg.Env != nil {
+		if _, ok := cfg.Env["GEMINI_API_KEY"]; ok {
+			t.Error("GEMINI_API_KEY should not be in env when no auth_selected_type is set")
+		}
 	}
 }
 
