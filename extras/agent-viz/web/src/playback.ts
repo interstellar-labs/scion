@@ -22,6 +22,7 @@ export class PlaybackControls {
 
   // Callbacks
   private onFilterChange?: (agents: string[], eventTypes: string[]) => void;
+  private onShowFileLabelsChange?: (show: boolean) => void;
 
   constructor(container: HTMLElement, ws: WSClient) {
     this.container = container;
@@ -53,6 +54,10 @@ export class PlaybackControls {
 
   setOnFilterChange(cb: (agents: string[], eventTypes: string[]) => void): void {
     this.onFilterChange = cb;
+  }
+
+  setOnShowFileLabelsChange(cb: (show: boolean) => void): void {
+    this.onShowFileLabelsChange = cb;
   }
 
   updateStatus(status: StatusUpdate): void {
@@ -108,6 +113,12 @@ export class PlaybackControls {
             <label class="filter-item"><input type="checkbox" checked data-event-type="file_edit"> File Edits</label>
             <label class="filter-item"><input type="checkbox" checked data-event-type="file_read"> File Reads</label>
             <label class="filter-item"><input type="checkbox" checked data-event-type="agent_create"> Lifecycle</label>
+          </div>
+        </div>
+        <div class="filter-section">
+          <h4>Display</h4>
+          <div class="display-options">
+            <label class="filter-item"><input type="checkbox" checked id="show-file-labels"> File Labels</label>
           </div>
         </div>
       </div>
@@ -176,6 +187,12 @@ export class PlaybackControls {
     // Event type filter changes
     this.filterPanel.querySelectorAll('.event-filters input').forEach((input) => {
       input.addEventListener('change', () => this.emitFilter());
+    });
+
+    // Display toggle: file labels
+    const fileLabelsToggle = this.container.querySelector<HTMLInputElement>('#show-file-labels')!;
+    fileLabelsToggle.addEventListener('change', () => {
+      this.onShowFileLabelsChange?.(fileLabelsToggle.checked);
     });
   }
 

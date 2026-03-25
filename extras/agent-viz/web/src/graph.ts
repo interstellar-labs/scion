@@ -14,6 +14,7 @@ export class FileGraph {
   private graph: ForceGraphInstance;
   private nodes: Map<string, GraphNode> = new Map();
   private container: HTMLElement;
+  private showLabels = true;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -169,6 +170,10 @@ export class FileGraph {
     return null;
   }
 
+  setShowLabels(show: boolean): void {
+    this.showLabels = show;
+  }
+
   reset(): void {
     this.nodes.clear();
     this.graph.graphData({ nodes: [], links: [] });
@@ -252,9 +257,10 @@ export class FileGraph {
     ctx.lineWidth = 0.5;
     ctx.stroke();
 
-    // Label — always visible for root and recently revealed files, otherwise when zoomed in
+    // Label — always visible for root; recently revealed or zoomed-in labels respect toggle
     const recentlyRevealed = node.revealTime !== undefined;
-    if ((isRoot || recentlyRevealed || globalScale > 0.8) && revealScale > 0.5) {
+    const showThisLabel = isRoot || (this.showLabels && (recentlyRevealed || globalScale > 2.0));
+    if (showThisLabel && revealScale > 0.5) {
       const fontSize = isRoot ? Math.max(5, 12 / globalScale) : Math.max(3, 10 / globalScale);
       ctx.font = `${isRoot ? 'bold ' : ''}${fontSize}px sans-serif`;
       ctx.textAlign = 'center';

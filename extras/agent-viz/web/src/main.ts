@@ -74,6 +74,7 @@ function init(): void {
   // WebSocket
   const ws = new WSClient();
   playbackControls = new PlaybackControls(controlsContainer, ws);
+  playbackControls.setOnShowFileLabelsChange((show) => fileGraph.setShowLabels(show));
 
   ws.onMessage((msg) => {
     if ('type' in msg) {
