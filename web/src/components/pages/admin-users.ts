@@ -17,18 +17,27 @@
 /**
  * Admin Users page component
  *
- * Read-only view of all users in the system with pagination
+ * View of all users with admin actions: promote/demote, suspend/reactivate, delete
  */
 
-import { LitElement, html, css } from 'lit';
+import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 
-import type { AdminUser } from '../../shared/types.js';
+import type { AdminUser, UserRole } from '../../shared/types.js';
 import '../shared/status-badge.js';
 import { extractApiError } from '../../client/api.js';
 
 type SortField = 'name' | 'created' | 'lastSeen';
 type SortDir = 'asc' | 'desc';
+
+interface ConfirmAction {
+  title: string;
+  message: string;
+  variant: 'primary' | 'danger' | 'warning';
+  confirmLabel: string;
+  user: AdminUser;
+  action: () => Promise<void>;
+}
 
 const PAGE_SIZE = 50;
 
@@ -60,6 +69,18 @@ export class ScionPageAdminUsers extends LitElement {
 
   @state()
   private cursorHistory: string[] = [];
+
+  @state()
+  private currentUserId: string | null = null;
+
+  @state()
+  private confirmAction: ConfirmAction | null = null;
+
+  @state()
+  private actionInProgress = false;
+
+  @state()
+  private actionFeedback: { message: string; variant: 'success' | 'danger' } | null = null;
 
   static override styles = css`
     :host {
@@ -371,6 +392,52 @@ export class ScionPageAdminUsers extends LitElement {
       padding: 0 0.5rem;
     }
 
+    .actions-cell {
+      text-align: right;
+      width: 3rem;
+    }
+
+    sl-dropdown sl-button::part(base) {
+      padding: 0.25rem;
+      min-height: unset;
+    }
+
+    sl-menu-item::part(base) {
+      font-size: 0.8125rem;
+    }
+
+    sl-menu-item sl-icon {
+      font-size: 1rem;
+    }
+
+    .menu-item-danger::part(base) {
+      color: var(--sl-color-danger-600, #dc2626);
+    }
+
+    .menu-item-danger::part(base):hover {
+      background: var(--sl-color-danger-50, #fef2f2);
+    }
+
+    .confirm-body {
+      font-size: 0.875rem;
+      line-height: 1.5;
+      color: var(--scion-text, #1e293b);
+    }
+
+    .confirm-user {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      margin: 0.75rem 0;
+      background: var(--scion-bg-subtle, #f1f5f9);
+      border-radius: var(--scion-radius, 0.5rem);
+    }
+
+    .feedback-alert {
+      margin-bottom: 1rem;
+    }
+
     @media (max-width: 768px) {
       .hide-mobile {
         display: none;
@@ -380,7 +447,20 @@ export class ScionPageAdminUsers extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    void this.loadCurrentUser();
     void this.loadUsers();
+  }
+
+  private async loadCurrentUser(): Promise<void> {
+    try {
+      const res = await fetch('/auth/me', { credentials: 'include' });
+      if (res.ok) {
+        const data = (await res.json()) as { id?: string };
+        this.currentUserId = data.id || null;
+      }
+    } catch {
+      // Non-critical — actions will still work, just can't prevent self-actions
+    }
   }
 
   private async loadUsers(cursor?: string): Promise<void> {
@@ -433,6 +513,101 @@ export class ScionPageAdminUsers extends LitElement {
     this.cursorHistory = history;
     const cursor = this.currentPage === 1 ? undefined : history[history.length - 1];
     void this.loadUsers(cursor);
+  }
+
+  private async updateUser(userId: string, updates: { role?: string; status?: string }): Promise<void> {
+    const response = await fetch(`/api/v1/users/${userId}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!response.ok) {
+      throw new Error(await extractApiError(response, `HTTP ${response.status}`));
+    }
+  }
+
+  private async deleteUser(userId: string): Promise<void> {
+    const response = await fetch(`/api/v1/users/${userId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error(await extractApiError(response, `HTTP ${response.status}`));
+    }
+  }
+
+  private promptChangeRole(user: AdminUser, newRole: UserRole): void {
+    const action = newRole === 'admin' ? 'Promote' : 'Change role';
+    const roleLabel = newRole === 'admin' ? 'an admin' : `a ${newRole}`;
+    this.confirmAction = {
+      title: `${action} to ${newRole}`,
+      message: `Are you sure you want to make this user ${roleLabel}?`,
+      variant: newRole === 'admin' ? 'warning' : 'primary',
+      confirmLabel: action,
+      user,
+      action: async () => {
+        await this.updateUser(user.id, { role: newRole });
+        this.showFeedback('success', `${user.displayName || user.email} is now ${roleLabel}.`);
+        void this.loadUsers(this.currentPage > 1 ? this.cursorHistory[this.cursorHistory.length - 1] : undefined);
+      },
+    };
+  }
+
+  private promptToggleSuspend(user: AdminUser): void {
+    const suspending = user.status === 'active';
+    this.confirmAction = {
+      title: suspending ? 'Suspend user' : 'Reactivate user',
+      message: suspending
+        ? 'This user will be unable to sign in or use the system while suspended.'
+        : 'This will restore the user\'s access to the system.',
+      variant: suspending ? 'warning' : 'primary',
+      confirmLabel: suspending ? 'Suspend' : 'Reactivate',
+      user,
+      action: async () => {
+        const newStatus = suspending ? 'suspended' : 'active';
+        await this.updateUser(user.id, { status: newStatus });
+        this.showFeedback('success', `${user.displayName || user.email} has been ${suspending ? 'suspended' : 'reactivated'}.`);
+        void this.loadUsers(this.currentPage > 1 ? this.cursorHistory[this.cursorHistory.length - 1] : undefined);
+      },
+    };
+  }
+
+  private promptDelete(user: AdminUser): void {
+    this.confirmAction = {
+      title: 'Delete user',
+      message: 'This action is permanent and cannot be undone. All data associated with this user will be removed.',
+      variant: 'danger',
+      confirmLabel: 'Delete',
+      user,
+      action: async () => {
+        await this.deleteUser(user.id);
+        this.showFeedback('success', `${user.displayName || user.email} has been deleted.`);
+        void this.loadUsers(this.currentPage > 1 ? this.cursorHistory[this.cursorHistory.length - 1] : undefined);
+      },
+    };
+  }
+
+  private async executeConfirmedAction(): Promise<void> {
+    if (!this.confirmAction) return;
+    this.actionInProgress = true;
+    try {
+      await this.confirmAction.action();
+    } catch (err) {
+      this.showFeedback('danger', err instanceof Error ? err.message : 'Action failed');
+    } finally {
+      this.actionInProgress = false;
+      this.confirmAction = null;
+    }
+  }
+
+  private showFeedback(variant: 'success' | 'danger', message: string): void {
+    this.actionFeedback = { variant, message };
+    setTimeout(() => { this.actionFeedback = null; }, 5000);
+  }
+
+  private isSelf(user: AdminUser): boolean {
+    return !!this.currentUserId && user.id === this.currentUserId;
   }
 
   private formatRelativeTime(dateString: string | undefined): string {
@@ -531,7 +706,25 @@ export class ScionPageAdminUsers extends LitElement {
           : ''}
       </div>
 
+      ${this.actionFeedback
+        ? html`
+            <sl-alert
+              class="feedback-alert"
+              variant=${this.actionFeedback.variant}
+              open
+              closable
+              duration="5000"
+              @sl-after-hide=${() => { this.actionFeedback = null; }}
+            >
+              <sl-icon slot="icon" name=${this.actionFeedback.variant === 'success' ? 'check-circle' : 'exclamation-triangle'}></sl-icon>
+              ${this.actionFeedback.message}
+            </sl-alert>
+          `
+        : nothing}
+
       ${this.loading ? this.renderLoading() : this.error ? this.renderError() : this.renderUsers()}
+
+      ${this.renderConfirmDialog()}
     `;
   }
 
@@ -601,6 +794,7 @@ export class ScionPageAdminUsers extends LitElement {
                 Created
                 <span class="sort-indicator">${this.sortIndicator('created')}</span>
               </th>
+              <th class="actions-cell"></th>
             </tr>
           </thead>
           <tbody>
@@ -644,6 +838,7 @@ export class ScionPageAdminUsers extends LitElement {
   }
 
   private renderUserRow(user: AdminUser) {
+    const self = this.isSelf(user);
     return html`
       <tr>
         <td>
@@ -676,7 +871,92 @@ export class ScionPageAdminUsers extends LitElement {
         <td class="hide-mobile">
           <span class="meta-text">${this.formatRelativeTime(user.created)}</span>
         </td>
+        <td class="actions-cell">
+          ${self
+            ? nothing
+            : html`
+                <sl-dropdown placement="bottom-end" hoist>
+                  <sl-button slot="trigger" size="small" variant="text" caret>
+                    <sl-icon name="three-dots-vertical"></sl-icon>
+                  </sl-button>
+                  <sl-menu>
+                    ${user.role !== 'admin'
+                      ? html`<sl-menu-item @click=${() => this.promptChangeRole(user, 'admin')}>
+                          <sl-icon slot="prefix" name="shield-check"></sl-icon>
+                          Promote to Admin
+                        </sl-menu-item>`
+                      : nothing}
+                    ${user.role === 'admin'
+                      ? html`<sl-menu-item @click=${() => this.promptChangeRole(user, 'member')}>
+                          <sl-icon slot="prefix" name="person"></sl-icon>
+                          Demote to Member
+                        </sl-menu-item>`
+                      : nothing}
+                    ${user.role !== 'viewer'
+                      ? html`<sl-menu-item @click=${() => this.promptChangeRole(user, 'viewer')}>
+                          <sl-icon slot="prefix" name="eye"></sl-icon>
+                          Set as Viewer
+                        </sl-menu-item>`
+                      : nothing}
+                    <sl-divider></sl-divider>
+                    ${user.status === 'active'
+                      ? html`<sl-menu-item @click=${() => this.promptToggleSuspend(user)}>
+                          <sl-icon slot="prefix" name="slash-circle"></sl-icon>
+                          Suspend
+                        </sl-menu-item>`
+                      : html`<sl-menu-item @click=${() => this.promptToggleSuspend(user)}>
+                          <sl-icon slot="prefix" name="check-circle"></sl-icon>
+                          Reactivate
+                        </sl-menu-item>`}
+                    <sl-divider></sl-divider>
+                    <sl-menu-item class="menu-item-danger" @click=${() => this.promptDelete(user)}>
+                      <sl-icon slot="prefix" name="trash"></sl-icon>
+                      Delete
+                    </sl-menu-item>
+                  </sl-menu>
+                </sl-dropdown>
+              `}
+        </td>
       </tr>
+    `;
+  }
+
+  private renderConfirmDialog() {
+    const action = this.confirmAction;
+    if (!action) return nothing;
+    return html`
+      <sl-dialog
+        label=${action.title}
+        open
+        @sl-request-close=${() => { if (!this.actionInProgress) this.confirmAction = null; }}
+      >
+        <div class="confirm-body">
+          <div class="confirm-user">
+            <div class="user-avatar">
+              ${action.user.avatarUrl
+                ? html`<img src="${action.user.avatarUrl}" alt="${action.user.displayName}" />`
+                : this.getInitials(action.user.displayName || action.user.email)}
+            </div>
+            <div class="user-info">
+              <span class="user-name">${action.user.displayName || action.user.email}</span>
+              <span class="user-email">${action.user.email}</span>
+            </div>
+          </div>
+          <p>${action.message}</p>
+        </div>
+        <sl-button
+          slot="footer"
+          variant="default"
+          ?disabled=${this.actionInProgress}
+          @click=${() => { this.confirmAction = null; }}
+        >Cancel</sl-button>
+        <sl-button
+          slot="footer"
+          variant=${action.variant}
+          ?loading=${this.actionInProgress}
+          @click=${() => this.executeConfirmedAction()}
+        >${action.confirmLabel}</sl-button>
+      </sl-dialog>
     `;
   }
 }
