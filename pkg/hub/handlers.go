@@ -31,6 +31,7 @@ import (
 	"github.com/GoogleCloudPlatform/scion/pkg/api"
 	"github.com/GoogleCloudPlatform/scion/pkg/config"
 	"github.com/GoogleCloudPlatform/scion/pkg/gcp"
+	"github.com/GoogleCloudPlatform/scion/pkg/hub/githubapp"
 	"github.com/GoogleCloudPlatform/scion/pkg/hubclient"
 	"github.com/GoogleCloudPlatform/scion/pkg/messages"
 	"github.com/GoogleCloudPlatform/scion/pkg/secret"
@@ -1838,13 +1839,31 @@ func (s *Server) handleAgentGitHubTokenRefresh(w http.ResponseWriter, r *http.Re
 
 	token, expiry, err := s.MintGitHubAppTokenForGrove(ctx, grove)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, ErrCodeInternalError,
+		// Classify the error to return an appropriate status code.
+		// Configuration errors (bad key, wrong app_id) are 502 (upstream auth failed),
+		// not 500 (our server is broken).
+		statusCode := http.StatusBadGateway
+		errCode := ErrCodeRuntimeError
+		if mintErr, ok := err.(*githubapp.TokenMintError); ok {
+			switch mintErr.ErrorCode {
+			case githubapp.ErrCodePrivateKeyInvalid, githubapp.ErrCodeAppNotFound:
+				statusCode = http.StatusBadGateway
+				errCode = ErrCodeRuntimeError
+			case githubapp.ErrCodeInstallationRevoked, githubapp.ErrCodeInstallationSuspended:
+				statusCode = http.StatusUnprocessableEntity
+				errCode = ErrCodeUnprocessable
+			case githubapp.ErrCodePermissionDenied, githubapp.ErrCodeRepoNotAccessible:
+				statusCode = http.StatusForbidden
+				errCode = ErrCodeForbidden
+			}
+		}
+		writeError(w, statusCode, errCode,
 			"failed to mint GitHub token: "+err.Error(), nil)
 		return
 	}
 
 	if token == "" {
-		writeError(w, http.StatusInternalServerError, ErrCodeInternalError,
+		writeError(w, http.StatusServiceUnavailable, ErrCodeUnavailable,
 			"GitHub App not configured on Hub", nil)
 		return
 	}
