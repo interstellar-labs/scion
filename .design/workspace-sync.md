@@ -427,12 +427,12 @@ CREATE TABLE grove_sync_state (
 - ✅ Support `--dry-run`, `--exclude`, `--force` flags
 - ✅ Grove resolution via `-g` flag or cwd
 
-### Phase 3: Linked Grove Relay
+### Phase 3: Linked Grove Relay ✅ Complete
 
-- For linked groves where workspace lives on a broker: hub maintains a cached copy
-- Broker pushes workspace updates to hub after agent modifications
-- Hub WebDAV serves from its cached copy
-- Implement cache invalidation / refresh triggers
+- ✅ For linked groves where workspace lives on a broker: hub maintains a cached copy
+- ✅ Broker pushes workspace updates to hub after agent modifications
+- ✅ Hub WebDAV serves from its cached copy
+- ✅ Implement cache invalidation / refresh triggers
 
 ### Phase 4: Git History Sync (Optional)
 
