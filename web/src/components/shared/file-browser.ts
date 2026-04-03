@@ -202,6 +202,51 @@ export class SharedDirFileBrowserDataSource implements FileBrowserDataSource {
   }
 }
 
+/**
+ * Data source for template files.
+ * API base: /api/v1/templates/{templateId}/files
+ */
+export class TemplateFileBrowserDataSource implements FileBrowserDataSource {
+  private readonly basePath: string;
+
+  constructor(templateId: string) {
+    this.basePath = `/api/v1/templates/${templateId}/files`;
+  }
+
+  async listFiles(): Promise<FileListResult> {
+    const response = await apiFetch(this.basePath);
+    if (!response.ok) {
+      throw new Error(await extractApiError(response, `HTTP ${response.status}`));
+    }
+    return (await response.json()) as FileListResult;
+  }
+
+  async deleteFile(path: string): Promise<void> {
+    const response = await apiFetch(`${this.basePath}/${encodeFilePath(path)}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok && response.status !== 204) {
+      throw new Error(await extractApiError(response, `Delete failed: HTTP ${response.status}`));
+    }
+  }
+
+  async uploadFiles(_files: FileList): Promise<void> {
+    throw new Error('Template file upload is not yet supported. Use the template import workflow instead.');
+  }
+
+  getDownloadUrl(path: string): string {
+    return `${this.basePath}/${encodeFilePath(path)}`;
+  }
+
+  getPreviewUrl(path: string): string {
+    return `${this.basePath}/${encodeFilePath(path)}?view=true`;
+  }
+
+  getArchiveUrl(): string | null {
+    return null;
+  }
+}
+
 // ────────────────────────────────────────────────────────────
 // Component
 // ────────────────────────────────────────────────────────────

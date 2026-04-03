@@ -1774,7 +1774,7 @@ export class ScionPageGroveSettings extends LitElement {
               <div class="template-list">
                 ${this.templates.map(
                   (t) => html`
-                    <div class="template-item">
+                    <a href="/groves/${this.groveId}/templates/${t.id}" class="template-item" style="text-decoration: none; color: inherit; cursor: pointer;">
                       <sl-icon name="file-earmark-code"></sl-icon>
                       <div class="template-info">
                         <div class="template-name">${t.displayName || t.name}</div>
@@ -1783,7 +1783,8 @@ export class ScionPageGroveSettings extends LitElement {
                           : ''}
                       </div>
                       ${t.harness ? html`<span class="template-badge">${t.harness}</span>` : ''}
-                    </div>
+                      <sl-icon name="chevron-right" style="color: var(--sl-color-neutral-400); font-size: 0.875rem;"></sl-icon>
+                    </a>
                   `
                 )}
               </div>

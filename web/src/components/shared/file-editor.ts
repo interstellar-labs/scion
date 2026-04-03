@@ -121,6 +121,33 @@ export class SharedDirFileEditorDataSource implements FileEditorDataSource {
   }
 }
 
+export class TemplateFileEditorDataSource implements FileEditorDataSource {
+  private readonly basePath: string;
+
+  constructor(templateId: string) {
+    this.basePath = `/api/v1/templates/${templateId}/files`;
+  }
+
+  async getFileContent(path: string): Promise<FileContentResponse> {
+    const res = await apiFetch(`${this.basePath}/${encodeFilePath(path)}`);
+    if (!res.ok) throw new Error(await extractApiError(res, `HTTP ${res.status}`));
+    return (await res.json()) as FileContentResponse;
+  }
+
+  async saveFileContent(path: string, content: string, _expectedModTime?: string): Promise<{ modTime: string }> {
+    const body: Record<string, string> = { content };
+
+    const res = await apiFetch(`${this.basePath}/${encodeFilePath(path)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await extractApiError(res, `HTTP ${res.status}`));
+    const data = (await res.json()) as { modTime: string };
+    return { modTime: data.modTime };
+  }
+}
+
 // ────────────────────────────────────────────────────────────
 // Component
 // ────────────────────────────────────────────────────────────

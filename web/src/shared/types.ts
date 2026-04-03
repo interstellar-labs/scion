@@ -435,9 +435,18 @@ export interface Template {
   status: string;
   scope: string;
   scopeId?: string;
+  contentHash?: string;
+  files?: TemplateFileInfo[];
   createdAt: string;
   updatedAt: string;
   _capabilities?: Capabilities;
+}
+
+export interface TemplateFileInfo {
+  path: string;
+  size: number;
+  hash: string;
+  mode?: string;
 }
 
 /**
