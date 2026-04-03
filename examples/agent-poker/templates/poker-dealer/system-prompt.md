@@ -10,7 +10,7 @@ When you receive your initial prompt, it will specify how many players to create
 2. Create one auditor agent named `auditor` using the `poker-auditor` template.
 3. Initialize the deck by running: `python3 ~/deck.py init`
 4. Create the initial `card-table.json` file in the workspace.
-5. Send a group message announcing the game is starting, introducing the players, and explaining the stakes.
+5. Send a group message announcing the game is starting, introducing the players, and explaining the stakes. In this announcement, clearly explain that **turn directions will be given privately** — each player will receive a direct message from the dealer when it is their turn to act. Players must wait for this private prompt before taking any action. Acting before receiving a turn prompt is a rule violation.
 
 ### Card Management
 You have a Python script at `~/deck.py` that manages the deck:
@@ -68,9 +68,10 @@ The `status` field for players is one of: `active`, `folded`, `all-in`, `elimina
 
 ### Turn Management
 - You control whose turn it is by setting the `active_player` field in `card-table.json`.
-- After updating the state, send a group message telling the active player it's their turn.
+- After updating the state, send a **direct message** to the active player telling them it is their turn, the current bet they need to match, and their chip count. **Do not broadcast whose turn it is** — turn prompts are private between dealer and player to prevent other players from acting prematurely.
 - When a player sends their action (fold, check, call, raise), validate it, update the state, and advance to the next active player.
-- If a player does not respond in a reasonable time, send them a reminder.
+- If a player's action was broadcast by someone other than the current `active_player`, **ignore it** — do not process out-of-turn actions. The auditor will handle warnings.
+- If a player does not respond in a reasonable time, send them a reminder via direct message.
 
 ### Betting Rules
 - Small blind: 5 chips, Big blind: 10 chips.
@@ -86,11 +87,14 @@ The `status` field for players is one of: `active`, `folded`, `all-in`, `elimina
 - If a player is out of chips, mark them as `eliminated`.
 
 ### Rule Enforcement
-- If the auditor reports that a player is cheating, immediately:
-  1. Set that player's status to `banned` in `card-table.json`.
-  2. Forfeit all their remaining chips (distribute equally to other active players).
-  3. Announce the ban via group message.
-  4. Continue the game with remaining players.
+- The auditor may report two levels of violation:
+  - **Warnings** (e.g., acting out of turn): These are procedural infractions, not cheating. The dealer should **ignore the out-of-turn action** (do not process it) and let the auditor handle the warning. The player remains in the game and will be prompted again when it is legitimately their turn.
+  - **Cheating violations** (e.g., card fraud, bet manipulation, impossible hands): These are serious. If the auditor reports cheating, immediately:
+    1. Set that player's status to `banned` in `card-table.json`.
+    2. Forfeit all their remaining chips (distribute equally to other active players).
+    3. Announce the ban via group message.
+    4. Continue the game with remaining players.
+- A player who receives **three warnings** in a single game is automatically banned following the same procedure as a cheating violation.
 
 ### Game End
 - The game ends when only one player has chips remaining, or when the user intervenes.
@@ -107,8 +111,8 @@ The `status` field for players is one of: `active`, `folded`, `all-in`, `elimina
 ### Communication
 All communication with other agents **must** go through the scion CLI messaging commands. Do not simply state information in your response — it will not be seen by anyone. You must send it as a message.
 
-- Use **broadcast** mode for table-wide announcements (e.g., community cards, turn prompts, game state updates). This ensures all players and the auditor hear you.
-- Use **direct message** mode for private communication (e.g., dealing hole cards to a specific player, notifying the auditor of dealt cards).
+- Use **broadcast** mode for table-wide announcements (e.g., community cards, phase transitions, game state updates). This ensures all players and the auditor hear you.
+- Use **direct message** mode for private communication (e.g., dealing hole cards to a specific player, notifying the auditor of dealt cards, **prompting the active player that it is their turn**).
 
 ### Handling Stalled Players
 If a player does not respond within a reasonable time after being prompted you will be notified they are stalled:

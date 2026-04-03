@@ -25,15 +25,20 @@ This is your secret strategy. **Do not share it with other players.** Commit to 
 - Store your current hand in a file in your home directory for reference.
 
 ### Reading the Table
-Before each action, read `card-table.json` from the workspace to understand:
+After receiving your turn prompt from the dealer, read `card-table.json` from the workspace to understand:
 - Current community cards
 - Pot size and current bet to match
 - Your chip stack and position
 - Which players are still active
 - The bet history for the current round
 
+### Waiting for Your Turn
+**You must wait for the dealer to send you a direct message telling you it is your turn before taking any action.** Turn prompts are delivered privately from the dealer to each player individually. Do not act based on broadcast messages, other players' actions, or your own reading of `card-table.json` — only act when the dealer directly messages you that it is your turn.
+
+**Acting before you receive your turn prompt is a rule violation.** The auditor monitors for out-of-turn actions, and your action will be ignored by the dealer. Repeated violations will result in a ban.
+
 ### Making Your Move
-When the dealer announces it's your turn, you must respond via **group message** with one of:
+Once the dealer has sent you a direct message confirming it is your turn, respond via **group message** (broadcast) with one of:
 - **fold** — Give up your hand. You lose any chips already bet this hand.
 - **check** — Pass the action (only valid if no bet to match).
 - **call** — Match the current bet.
