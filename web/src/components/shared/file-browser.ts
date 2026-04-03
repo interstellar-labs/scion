@@ -230,8 +230,18 @@ export class TemplateFileBrowserDataSource implements FileBrowserDataSource {
     }
   }
 
-  async uploadFiles(_files: FileList): Promise<void> {
-    throw new Error('Template file upload is not yet supported. Use the template import workflow instead.');
+  async uploadFiles(files: FileList): Promise<void> {
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append(files[i].name, files[i]);
+    }
+    const response = await apiFetch(this.basePath, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      throw new Error(await extractApiError(response, `Upload failed: HTTP ${response.status}`));
+    }
   }
 
   getDownloadUrl(path: string): string {

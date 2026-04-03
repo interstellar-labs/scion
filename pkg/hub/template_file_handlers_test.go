@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -424,5 +425,203 @@ func TestHandleTemplateFileDelete_NotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// templateMultipartRequest creates a multipart form request for template file upload tests.
+func templateMultipartRequest(t *testing.T, templateID string, files map[string][]byte) *http.Request {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	for fieldName, content := range files {
+		part, err := writer.CreateFormFile(fieldName, fieldName)
+		if err != nil {
+			t.Fatalf("failed to create form file: %v", err)
+		}
+		if _, err := part.Write(content); err != nil {
+			t.Fatalf("failed to write form file: %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/"+templateID+"/files", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
+}
+
+func TestHandleTemplateFileUpload(t *testing.T) {
+	srv, s, stor := testTemplateFileServer(t)
+	ctx := context.Background()
+
+	tmpl := createTestTemplate(t, s, stor, map[string]string{
+		"CLAUDE.md": "# Agent",
+	})
+
+	req := templateMultipartRequest(t, tmpl.ID, map[string][]byte{
+		"config.yaml": []byte("key: value\n"),
+	})
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp TemplateFileUploadResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.Files) != 1 {
+		t.Fatalf("expected 1 uploaded file, got %d", len(resp.Files))
+	}
+	if resp.Files[0].Path != "config.yaml" {
+		t.Errorf("expected path config.yaml, got %s", resp.Files[0].Path)
+	}
+	if resp.Hash == "" {
+		t.Error("expected non-empty content hash")
+	}
+
+	// Verify manifest updated
+	updated, err := s.GetTemplate(ctx, tmpl.ID)
+	if err != nil {
+		t.Fatalf("failed to get template: %v", err)
+	}
+	if len(updated.Files) != 2 {
+		t.Errorf("expected 2 files in manifest, got %d", len(updated.Files))
+	}
+
+	// Verify storage
+	stored := stor.content[tmpl.StoragePath+"/config.yaml"]
+	if string(stored) != "key: value\n" {
+		t.Errorf("unexpected stored content: %s", string(stored))
+	}
+}
+
+func TestHandleTemplateFileUpload_MultipleFiles(t *testing.T) {
+	srv, s, stor := testTemplateFileServer(t)
+	ctx := context.Background()
+
+	tmpl := createTestTemplate(t, s, stor, map[string]string{})
+
+	req := templateMultipartRequest(t, tmpl.ID, map[string][]byte{
+		"CLAUDE.md":    []byte("# Instructions"),
+		"home/.bashrc": []byte("export FOO=bar"),
+		"config.json":  []byte(`{"setting": true}`),
+	})
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp TemplateFileUploadResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(resp.Files) != 3 {
+		t.Errorf("expected 3 uploaded files, got %d", len(resp.Files))
+	}
+
+	updated, err := s.GetTemplate(ctx, tmpl.ID)
+	if err != nil {
+		t.Fatalf("failed to get template: %v", err)
+	}
+	if len(updated.Files) != 3 {
+		t.Errorf("expected 3 files in manifest, got %d", len(updated.Files))
+	}
+}
+
+func TestHandleTemplateFileUpload_LockedTemplate(t *testing.T) {
+	srv, s, stor := testTemplateFileServer(t)
+	ctx := context.Background()
+
+	tmpl := createTestTemplate(t, s, stor, map[string]string{
+		"CLAUDE.md": "# Agent",
+	})
+
+	tmpl.Locked = true
+	if err := s.UpdateTemplate(ctx, tmpl); err != nil {
+		t.Fatalf("failed to lock template: %v", err)
+	}
+
+	req := templateMultipartRequest(t, tmpl.ID, map[string][]byte{
+		"config.yaml": []byte("key: value"),
+	})
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleTemplateFileUpload_NoFiles(t *testing.T) {
+	srv, s, stor := testTemplateFileServer(t)
+
+	tmpl := createTestTemplate(t, s, stor, map[string]string{
+		"CLAUDE.md": "# Agent",
+	})
+
+	// Send an empty multipart form
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/"+tmpl.ID+"/files", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleTemplateFileUpload_OverwriteExisting(t *testing.T) {
+	srv, s, stor := testTemplateFileServer(t)
+	ctx := context.Background()
+
+	tmpl := createTestTemplate(t, s, stor, map[string]string{
+		"CLAUDE.md": "# Old Content",
+	})
+
+	oldHash := tmpl.ContentHash
+
+	req := templateMultipartRequest(t, tmpl.ID, map[string][]byte{
+		"CLAUDE.md": []byte("# New Content"),
+	})
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify manifest has exactly 1 file (not duplicated)
+	updated, err := s.GetTemplate(ctx, tmpl.ID)
+	if err != nil {
+		t.Fatalf("failed to get template: %v", err)
+	}
+	if len(updated.Files) != 1 {
+		t.Errorf("expected 1 file (no duplicate), got %d", len(updated.Files))
+	}
+
+	// Verify content hash changed
+	if updated.ContentHash == oldHash {
+		t.Error("expected content hash to change after overwrite")
+	}
+
+	// Verify storage updated
+	stored := stor.content[tmpl.StoragePath+"/CLAUDE.md"]
+	if string(stored) != "# New Content" {
+		t.Errorf("unexpected stored content: %s", string(stored))
 	}
 }

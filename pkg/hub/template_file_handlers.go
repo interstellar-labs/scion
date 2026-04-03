@@ -15,8 +15,10 @@
 package hub
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -55,6 +57,12 @@ type TemplateFileContentResponse struct {
 	Hash     string `json:"hash,omitempty"`
 }
 
+// TemplateFileUploadResponse is the response after uploading template files.
+type TemplateFileUploadResponse struct {
+	Files []TemplateFileEntry `json:"files"`
+	Hash  string              `json:"hash"`
+}
+
 // TemplateFileWriteRequest is the request body for writing a template file.
 type TemplateFileWriteRequest struct {
 	Content      string `json:"content"`
@@ -73,10 +81,12 @@ type TemplateFileWriteResponse struct {
 // filePath is empty for listing, non-empty for single-file operations.
 func (s *Server) handleTemplateFiles(w http.ResponseWriter, r *http.Request, templateID, filePath string) {
 	if filePath == "" {
-		// Collection endpoint: GET = list
+		// Collection endpoint: GET = list, POST = upload
 		switch r.Method {
 		case http.MethodGet:
 			s.handleTemplateFileList(w, r, templateID)
+		case http.MethodPost:
+			s.handleTemplateFileUpload(w, r, templateID)
 		default:
 			MethodNotAllowed(w)
 		}
@@ -281,6 +291,129 @@ func (s *Server) handleTemplateFileWrite(w http.ResponseWriter, r *http.Request,
 		Size:    fileSize,
 		Hash:    fileHash,
 		ModTime: template.Updated.UTC().Format("2006-01-02T15:04:05Z"),
+	})
+}
+
+// handleTemplateFileUpload handles multipart file uploads to a template.
+func (s *Server) handleTemplateFileUpload(w http.ResponseWriter, r *http.Request, templateID string) {
+	ctx := r.Context()
+
+	template, err := s.store.GetTemplate(ctx, templateID)
+	if err != nil {
+		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	if template.Locked {
+		Forbidden(w)
+		return
+	}
+
+	stor := s.GetStorage()
+	if stor == nil {
+		RuntimeError(w, "Storage not configured")
+		return
+	}
+
+	// Apply total request body size limit
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadTotalSize)
+
+	if err := r.ParseMultipartForm(maxUploadTotalSize); err != nil {
+		if err.Error() == "http: request body too large" {
+			BadRequest(w, "Request body exceeds 100MB limit")
+			return
+		}
+		BadRequest(w, "Invalid multipart form: "+err.Error())
+		return
+	}
+
+	if r.MultipartForm == nil || len(r.MultipartForm.File) == 0 {
+		ValidationError(w, "No files provided", nil)
+		return
+	}
+
+	var uploaded []TemplateFileEntry
+
+	for fieldName, fileHeaders := range r.MultipartForm.File {
+		for _, fh := range fileHeaders {
+			relPath := fieldName
+
+			if err := validateWorkspaceFilePath(relPath); err != nil {
+				BadRequest(w, fmt.Sprintf("Invalid file path %q: %s", relPath, err.Error()))
+				return
+			}
+
+			if fh.Size > maxUploadFileSize {
+				BadRequest(w, fmt.Sprintf("File %q exceeds 50MB limit", relPath))
+				return
+			}
+
+			src, err := fh.Open()
+			if err != nil {
+				RuntimeError(w, "Failed to open uploaded file")
+				return
+			}
+
+			data, err := io.ReadAll(src)
+			src.Close()
+			if err != nil {
+				RuntimeError(w, "Failed to read uploaded file")
+				return
+			}
+
+			// Upload to storage
+			objectPath := template.StoragePath + "/" + relPath
+			_, err = stor.Upload(ctx, objectPath, bytes.NewReader(data), storage.UploadOptions{
+				ContentType: "application/octet-stream",
+			})
+			if err != nil {
+				RuntimeError(w, "Failed to upload file to storage")
+				return
+			}
+
+			// Compute file hash
+			h := sha256.Sum256(data)
+			fileHash := "sha256:" + hex.EncodeToString(h[:])
+			fileSize := int64(len(data))
+
+			// Update or add to manifest
+			fileFound := false
+			for i := range template.Files {
+				if template.Files[i].Path == relPath {
+					template.Files[i].Size = fileSize
+					template.Files[i].Hash = fileHash
+					fileFound = true
+					break
+				}
+			}
+			if !fileFound {
+				template.Files = append(template.Files, store.TemplateFile{
+					Path: relPath,
+					Size: fileSize,
+					Hash: fileHash,
+				})
+			}
+
+			uploaded = append(uploaded, TemplateFileEntry{
+				Path:    relPath,
+				Size:    fileSize,
+				ModTime: template.Updated.UTC().Format("2006-01-02T15:04:05Z"),
+				Mode:    "0644",
+			})
+		}
+	}
+
+	// Recompute content hash
+	template.ContentHash = computeContentHash(template.Files)
+
+	if err := s.store.UpdateTemplate(ctx, template); err != nil {
+		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, TemplateFileUploadResponse{
+		Files: uploaded,
+		Hash:  template.ContentHash,
 	})
 }
 

@@ -319,13 +319,13 @@ The `locked` field on templates was introduced speculatively in earlier designs 
 - [x] Gate edit/delete/upload on `update` capability
 - [x] Content hash recomputation on save
 
-### Phase 2: Upload & Polish
+### Phase 2: Upload & Polish ✅
 
-- [ ] Add `POST /api/v1/templates/{templateId}/files` upload endpoint (multipart)
-- [ ] Template file upload UI via file browser toolbar
-- [ ] Markdown preview for template `.md` files via eye icon (if [web-file-editor.md](./web-file-editor.md) Phase 3 is complete)
-- [ ] Tree view for nested template file structures (stretch)
-- [ ] Template ZIP download (stretch)
+- [x] Add `POST /api/v1/templates/{templateId}/files` upload endpoint (multipart)
+- [x] Template file upload UI via file browser toolbar
+- [x] Markdown preview for template `.md` files via eye icon ([web-file-editor.md](./web-file-editor.md) Phase 3 is complete)
+- [ ] Tree view for nested template file structures (deferred)
+- [ ] Template ZIP download (deferred)
 
 ---
 
