@@ -342,7 +342,7 @@ type rawCommonEventObject struct {
 }
 
 type rawTimeZone struct {
-	ID     string `json:"id"`
+	ID     string      `json:"id"`
 	Offset json.Number `json:"offset"`
 }
 
